@@ -1,0 +1,55 @@
+{
+  "hash": "6c8a31b9",
+  "configHash": "1a5e634d",
+  "lockfileHash": "5a24d779",
+  "browserHash": "73ff26ef",
+  "optimized": {
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "482a210b",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "96d87dec",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "8af6105c",
+      "needsInterop": true
+    },
+    "d3-geo": {
+      "src": "../../node_modules/d3-geo/src/index.js",
+      "file": "d3-geo.js",
+      "fileHash": "8f4a3190",
+      "needsInterop": false
+    },
+    "topojson-client": {
+      "src": "../../node_modules/topojson-client/src/index.js",
+      "file": "topojson-client.js",
+      "fileHash": "78b1bdc5",
+      "needsInterop": false
+    },
+    "react-dom": {
+      "src": "../../node_modules/react-dom/index.js",
+      "file": "react-dom.js",
+      "fileHash": "50286d46",
+      "needsInterop": true
+    }
+  },
+  "chunks": {
+    "chunk-VSRKE2SQ": {
+      "file": "chunk-VSRKE2SQ.js"
+    },
+    "chunk-PWS3YOEW": {
+      "file": "chunk-PWS3YOEW.js"
+    },
+    "chunk-BUSYA2B4": {
+      "file": "chunk-BUSYA2B4.js"
+    }
+  }
+}

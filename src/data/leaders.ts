@@ -25,6 +25,7 @@ export type Leader = {
 
   // Relative paths (for GitHub Pages friendliness)
   heroArtPath: string;
+  heroObjectPosition?: string;
   cardArtPath: string;
 };
 
@@ -40,6 +41,7 @@ export const LEADERS: Leader[] = [
     perkType: "DEF_PER_WALL_LEVEL",
     perkValue: 0.015,
     heroArtPath: "assets/faction_select/heroes/alphonsus/hero.png",
+    heroObjectPosition: "50% 8%",
     cardArtPath: "assets/faction_select/cards/alphonsus.png",
   },
   {
@@ -53,6 +55,7 @@ export const LEADERS: Leader[] = [
     perkType: "MINING_MULT",
     perkValue: 0.10,
     heroArtPath: "assets/faction_select/heroes/douglas/hero.png",
+    heroObjectPosition: "50% 10%",
     cardArtPath: "assets/faction_select/cards/douglas.png",
   },
   {
@@ -66,6 +69,7 @@ export const LEADERS: Leader[] = [
     perkType: "INF_ATTACK_MULT",
     perkValue: 0.05,
     heroArtPath: "assets/faction_select/heroes/edmund/hero.png",
+    heroObjectPosition: "50% 8%",
     cardArtPath: "assets/faction_select/cards/edmund.png",
   },
   {
@@ -79,6 +83,7 @@ export const LEADERS: Leader[] = [
     perkType: "RESEARCH_RATE_MULT",
     perkValue: 0.05,
     heroArtPath: "assets/faction_select/heroes/ulmann/hero.png",
+    heroObjectPosition: "50% 10%",
     cardArtPath: "assets/faction_select/cards/ulmann.png",
   },
 ];

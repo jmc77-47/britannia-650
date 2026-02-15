@@ -7,6 +7,8 @@ type Props = {
   onConfirm: (leaderId: LeaderId) => void;
 };
 
+const DEFAULT_HERO_OBJECT_POSITION = "50% 10%";
+
 export default function FactionSelectScreen({ initialSelectedId, onConfirm }: Props) {
   const [selectedId, setSelectedId] = React.useState<LeaderId | null>(null);
   const [hoveredId, setHoveredId] = React.useState<LeaderId | null>(null);
@@ -45,7 +47,10 @@ export default function FactionSelectScreen({ initialSelectedId, onConfirm }: Pr
             <img
               src={assetUrl(displayed.heroArtPath)}
               alt={`${displayed.name} hero`}
-              style={styles.heroImage}
+              style={{
+                ...styles.heroImage,
+                objectPosition: displayed.heroObjectPosition ?? DEFAULT_HERO_OBJECT_POSITION,
+              }}
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
               }}
@@ -205,7 +210,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: "100%",
     height: "100%",
     objectFit: "cover",
-    transform: "scale(1.04) translateY(-8px)",
+    transform: "scale(1.03)",
     filter: "contrast(1.05) saturate(1.05)",
   },
 
