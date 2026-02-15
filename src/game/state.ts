@@ -111,9 +111,6 @@ const fetchJson = async <T>(path: string): Promise<T> => {
   return (await response.json()) as T
 }
 
-const clampInteger = (value: number, min: number, max: number): number =>
-  Math.round(Math.min(max, Math.max(min, value)))
-
 export const createStartingResources = (): ResourceStockpile => ({
   gold: 240,
   population: 6200,
@@ -154,10 +151,6 @@ const parseCountyState = (payload: unknown): Record<string, CountyGameState> => 
         Number.isFinite(county.prosperityBase)
           ? county.prosperityBase
           : 0
-      const roadLevelRaw =
-        typeof county.roadLevel === 'number' && Number.isFinite(county.roadLevel)
-          ? county.roadLevel
-          : 1
 
       counties[countyId] = {
         id: countyId,
@@ -165,7 +158,7 @@ const parseCountyState = (payload: unknown): Record<string, CountyGameState> => 
         buildings: [],
         defense: 0,
         prosperity,
-        roadLevel: clampInteger(roadLevelRaw, 0, 5),
+        roadLevel: 0,
       }
     },
   )

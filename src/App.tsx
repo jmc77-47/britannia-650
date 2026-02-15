@@ -888,6 +888,13 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     edges.sort((left, right) => left.id.localeCompare(right.id))
     return edges
   }, [mapData.countyNeighborIdsByCounty])
+  const getEffectiveRoadLevel = useCallback(
+    (countyId: string): number => {
+      const baseRoadLevel = gameState.counties[countyId]?.roadLevel ?? 0
+      return gameState.superhighwaysEnabled ? 5 : baseRoadLevel
+    },
+    [gameState.counties, gameState.superhighwaysEnabled],
+  )
 
   const roadRenderModels = useMemo<RoadRenderModel[]>(() => {
     if (isSetupPhase) {
@@ -908,11 +915,10 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         return
       }
 
-      const countyARoadLevel = gameState.counties[edge.countyAId]?.roadLevel ?? 1
-      const countyBRoadLevel = gameState.counties[edge.countyBId]?.roadLevel ?? 1
-      const level = gameState.superhighwaysEnabled
-        ? 5
-        : Math.min(countyARoadLevel, countyBRoadLevel)
+      const level = Math.min(
+        getEffectiveRoadLevel(edge.countyAId),
+        getEffectiveRoadLevel(edge.countyBId),
+      )
       if (level < 1) {
         return
       }
@@ -935,8 +941,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     return roads
   }, [
     countyRoadEdges,
-    gameState.counties,
-    gameState.superhighwaysEnabled,
+    getEffectiveRoadLevel,
     isCountyVisible,
     isSetupPhase,
     projectedMap.counties,
@@ -1192,7 +1197,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
             )}
 
             {gameState.gamePhase === 'playing' && (
-              <g className="fortified-county-layer">
+              <g className="fortified-city-layer">
                 {projectedMap.counties
                   .filter((county) => {
                     if (!isCountyVisible(county.id)) {
@@ -1201,9 +1206,17 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
                     return gameState.counties[county.id]?.buildings.includes('PALISADE')
                   })
                   .map((county) => (
-                    <g key={`fortified-county-${county.id}`}>
-                      <path className="fortified-county-glow" d={county.d} />
-                      <path className="fortified-county-outline" d={county.d} />
+                    <g
+                      className="fortified-city-marker"
+                      key={`fortified-city-${county.id}`}
+                      pointerEvents="none"
+                      transform={`translate(${county.centroid[0]} ${county.centroid[1]})`}
+                    >
+                      <circle className="fortified-city-base" r="7.2" />
+                      <rect className="fortified-city-keep" height="8.4" rx="0.9" width="9.2" x="-4.6" y="-6.9" />
+                      <rect className="fortified-city-crenel" height="2.4" rx="0.45" width="2.6" x="-5.1" y="-9.7" />
+                      <rect className="fortified-city-crenel" height="2.4" rx="0.45" width="2.6" x="-1.3" y="-9.7" />
+                      <rect className="fortified-city-crenel" height="2.4" rx="0.45" width="2.6" x="2.5" y="-9.7" />
                     </g>
                   ))}
               </g>

@@ -62,6 +62,18 @@ export const resolveTurn = (state: GameState): GameState => {
     }
   })
 
+  state.ownedCountyIds.forEach((countyId) => {
+    const countyState = nextCounties[countyId]
+    if (!countyState || countyState.roadLevel >= 1) {
+      return
+    }
+
+    nextCounties[countyId] = {
+      ...countyState,
+      roadLevel: 1,
+    }
+  })
+
   Object.values(nextCounties).forEach((countyState) => {
     countyState.buildings.forEach((buildingType) => {
       const definition = BUILDING_DEFINITIONS[buildingType]

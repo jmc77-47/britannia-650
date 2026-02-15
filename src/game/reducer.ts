@@ -93,6 +93,18 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       : startingCountyId
         ? [startingCountyId]
         : []
+    const countiesWithOwnedRoadMinimum = { ...state.counties }
+    ownedCountyIds.forEach((countyId) => {
+      const countyState = state.counties[countyId]
+      if (!countyState || countyState.roadLevel >= 1) {
+        return
+      }
+
+      countiesWithOwnedRoadMinimum[countyId] = {
+        ...countyState,
+        roadLevel: 1,
+      }
+    })
     const resourcesByKingdomId = {
       ...state.resourcesByKingdomId,
       [playerFactionId]: createStartingResources(),
@@ -115,6 +127,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionName: kingdom?.name ?? `${selectedCharacter.name}'s Realm`,
       playerFactionColor: kingdom?.color ?? '#f3c94b',
       ownedCountyIds,
+      counties: countiesWithOwnedRoadMinimum,
       resourcesByKingdomId,
       buildQueueByCountyId: {},
       fogOfWarEnabled: true,

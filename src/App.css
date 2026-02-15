@@ -146,27 +146,30 @@
   animation: player-outline-pulse 2.3s ease-in-out infinite;
 }
 
-.fortified-county-glow {
-  fill: none;
-  stroke: rgba(255, 147, 102, 0.76);
-  stroke-width: 9;
-  vector-effect: non-scaling-stroke;
-  stroke-linejoin: round;
-  stroke-linecap: round;
+.fortified-city-marker {
   pointer-events: none;
-  filter: blur(2.4px);
-  animation: fortified-pulse 1.9s ease-in-out infinite;
 }
 
-.fortified-county-outline {
-  fill: none;
-  stroke: #ffba8f;
-  stroke-width: 3;
+.fortified-city-base {
+  fill: rgba(30, 19, 13, 0.82);
+  stroke: rgba(255, 198, 144, 0.82);
+  stroke-width: 1.4;
   vector-effect: non-scaling-stroke;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-  pointer-events: none;
-  filter: drop-shadow(0 0 10px rgba(255, 160, 110, 0.45));
+  filter: drop-shadow(0 0 6px rgba(255, 173, 117, 0.5));
+}
+
+.fortified-city-keep {
+  fill: rgba(225, 173, 127, 0.95);
+  stroke: rgba(41, 27, 18, 0.9);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.fortified-city-crenel {
+  fill: rgba(247, 214, 176, 0.98);
+  stroke: rgba(44, 27, 18, 0.88);
+  stroke-width: 0.9;
+  vector-effect: non-scaling-stroke;
 }
 
 .borders-path {
@@ -1542,18 +1545,6 @@ button:disabled {
   }
 }
 
-@keyframes fortified-pulse {
-  0% {
-    opacity: 0.58;
-  }
-  50% {
-    opacity: 0.94;
-  }
-  100% {
-    opacity: 0.58;
-  }
-}
-
 @keyframes start-fade {
   from {
     opacity: 0;
@@ -1695,8 +1686,7 @@ button:disabled {
   .start-card,
   .fog-texture,
   .player-county-glow,
-  .player-county-outline,
-  .fortified-county-glow {
+  .player-county-outline {
     animation: none;
   }
 
