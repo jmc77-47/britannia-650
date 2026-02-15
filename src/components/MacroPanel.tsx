@@ -1,4 +1,10 @@
-import { BUILDING_DEFINITIONS, BUILDING_ORDER, type BuildingType } from '../game/buildings'
+import {
+  BUILDING_DEFINITIONS,
+  BUILDING_ORDER,
+  type BuildingType,
+  type ResourceDelta,
+} from '../game/buildings'
+import { getNonZeroResourceDeltaEntries } from '../game/economy'
 
 export type MacroPanelTab = 'BUILD' | 'TROOPS' | 'RESEARCH' | 'POLICIES'
 
@@ -13,6 +19,8 @@ interface MacroPanelProps {
   selectedCountyOwned: boolean
   selectedCountyBuildings: BuildingType[]
   selectedCountyDefense: number
+  selectedCountyRoadLevel: number
+  selectedCountyYields: ResourceDelta
   queuedBuildings: BuildingType[]
   canQueueByBuilding: Record<BuildingType, boolean>
   buildingCostLabels: Record<BuildingType, string>
@@ -43,6 +51,8 @@ export function MacroPanel({
   selectedCountyOwned,
   selectedCountyBuildings,
   selectedCountyDefense,
+  selectedCountyRoadLevel,
+  selectedCountyYields,
   queuedBuildings,
   canQueueByBuilding,
   buildingCostLabels,
@@ -54,6 +64,7 @@ export function MacroPanel({
 }: MacroPanelProps) {
   const hasSelectedCounty = selectedCounty !== null
   const uniqueBuildingTypes = [...new Set(selectedCountyBuildings)]
+  const selectedCountyYieldEntries = getNonZeroResourceDeltaEntries(selectedCountyYields)
 
   return (
     <aside className="HudPanel MacroPanel" aria-label="Macro controls">
@@ -119,6 +130,36 @@ export function MacroPanel({
             )}
             {selectedCountyDefense > 0 && (
               <span className="building-tag is-defense">Defense +{selectedCountyDefense}</span>
+            )}
+          </div>
+
+          <div className="development-block">
+            <p className="development-subheading">County stats</p>
+            <dl className="county-stats-list">
+              <div>
+                <dt>Roads</dt>
+                <dd>Level {selectedCountyRoadLevel}</dd>
+              </div>
+              <div>
+                <dt>Defense</dt>
+                <dd>{selectedCountyDefense}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div className="development-block">
+            <p className="development-subheading">Yields per turn</p>
+            {selectedCountyYieldEntries.length > 0 ? (
+              <ul className="county-yield-list">
+                {selectedCountyYieldEntries.map((entry) => (
+                  <li key={`county-yield-${entry.key}`}>
+                    <span>{entry.label}</span>
+                    <strong>+{entry.amount}</strong>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="queue-empty">No per-turn yields from this county.</p>
             )}
           </div>
 

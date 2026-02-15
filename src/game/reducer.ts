@@ -41,6 +41,9 @@ export type GameAction =
       countyId: string
       queueIndex: number
     }
+  | {
+      type: 'CLOSE_TURN_REPORT'
+    }
 
 const normalizeCountyIdList = (countyIds: string[]): string[] => {
   const uniqueCountyIds = new Set<string>()
@@ -68,6 +71,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionColor: null,
       ownedCountyIds: [],
       buildQueueByCountyId: {},
+      lastTurnReport: null,
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
       discoveredCountyIds: [],
@@ -130,6 +134,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       counties: countiesWithOwnedRoadMinimum,
       resourcesByKingdomId,
       buildQueueByCountyId: {},
+      lastTurnReport: null,
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
       discoveredCountyIds,
@@ -238,6 +243,17 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
         ...state.buildQueueByCountyId,
         [countyId]: nextQueue,
       },
+    }
+  }
+
+  if (action.type === 'CLOSE_TURN_REPORT') {
+    if (!state.lastTurnReport) {
+      return state
+    }
+
+    return {
+      ...state,
+      lastTurnReport: null,
     }
   }
 

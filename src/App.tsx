@@ -17,6 +17,7 @@ import {
 } from 'topojson-client'
 import { MacroPanel, type MacroPanelTab } from './components/MacroPanel'
 import { Modal } from './components/Modal'
+import { TurnReportModal } from './components/TurnReportModal'
 import { gameReducer } from './game/reducer'
 import {
   BUILDING_DEFINITIONS,
@@ -26,6 +27,7 @@ import {
   formatCostLabel,
   type BuildingType,
 } from './game/buildings'
+import { getCountyYields } from './game/economy'
 import {
   CanvasRoadLayer,
   type RoadRenderModel,
@@ -548,6 +550,13 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         : false,
     [ownedCountyIdSet, selectedCountyForPanel],
   )
+  const selectedCountyYields = useMemo(
+    () =>
+      selectedCountyForPanel
+        ? getCountyYields(selectedCountyForPanel.id, gameState)
+        : {},
+    [gameState, selectedCountyForPanel],
+  )
   const selectedCharacter = useMemo(
     () =>
       gameState.selectedCharacterId
@@ -1035,6 +1044,9 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       ),
     [],
   )
+  const closeTurnReport = useCallback(() => {
+    dispatch({ type: 'CLOSE_TURN_REPORT' })
+  }, [])
 
   return (
     <div className={`MacroRoot${isDragging ? ' is-map-dragging' : ''}`}>
@@ -1348,6 +1360,8 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           queuedBuildings={selectedCountyQueue}
           selectedCountyBuildings={selectedCountyState?.buildings ?? []}
           selectedCountyDefense={selectedCountyState?.defense ?? 0}
+          selectedCountyRoadLevel={selectedCountyState?.roadLevel ?? 0}
+          selectedCountyYields={selectedCountyYields}
           selectedCountyOwned={selectedCountyOwned}
           selectedCounty={selectedCountyForPanel}
           turnNumber={gameState.turnNumber}
@@ -1426,6 +1440,8 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           </div>
         </section>
       </Modal>
+
+      <TurnReportModal onClose={closeTurnReport} report={gameState.lastTurnReport} />
 
       {isSetupPhase && (
         <div aria-labelledby="setup-title" aria-modal="true" className="StartOverlay" role="dialog">

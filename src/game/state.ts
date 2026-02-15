@@ -1,5 +1,5 @@
 import type { MacroOrder } from './orders'
-import type { BuildingType } from './buildings'
+import type { BuildingType, ResourceDelta } from './buildings'
 import { assetUrl } from '../lib/assetUrl'
 
 export type GamePhase = 'setup' | 'playing'
@@ -37,6 +37,12 @@ export interface ResourceStockpile {
   horses: number
 }
 
+export interface TurnReport {
+  turnNumber: number
+  resourceDeltas: ResourceDelta
+  topContributions: string[]
+}
+
 export interface GameState {
   gamePhase: GamePhase
   turnNumber: number
@@ -49,6 +55,7 @@ export interface GameState {
   ownedCountyIds: string[]
   resourcesByKingdomId: Record<string, ResourceStockpile>
   buildQueueByCountyId: Record<string, BuildingType[]>
+  lastTurnReport: TurnReport | null
   fogOfWarEnabled: boolean
   superhighwaysEnabled: boolean
   discoveredCountyIds: string[]
@@ -270,6 +277,7 @@ export const createInitialGameState = async (): Promise<GameState> => {
     ownedCountyIds: [],
     resourcesByKingdomId,
     buildQueueByCountyId: {},
+    lastTurnReport: null,
     fogOfWarEnabled: true,
     superhighwaysEnabled: false,
     discoveredCountyIds: [],

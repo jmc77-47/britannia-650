@@ -6,6 +6,7 @@ import {
   hasEnoughResources,
   subtractResourceDelta,
 } from './buildings'
+import { getPlayerTurnYieldSummary } from './economy'
 import type { GameState } from './state'
 
 export const resolveTurn = (state: GameState): GameState => {
@@ -74,28 +75,31 @@ export const resolveTurn = (state: GameState): GameState => {
     }
   })
 
-  Object.values(nextCounties).forEach((countyState) => {
-    countyState.buildings.forEach((buildingType) => {
-      const definition = BUILDING_DEFINITIONS[buildingType]
-      if (!definition) {
-        return
-      }
-
-      nextPlayerResources = addResourceDelta(nextPlayerResources, definition.yieldsPerTurn)
-    })
-  })
+  const postBuildState = {
+    ...state,
+    counties: nextCounties,
+  }
+  const turnYieldSummary = getPlayerTurnYieldSummary(postBuildState)
+  nextPlayerResources = addResourceDelta(nextPlayerResources, turnYieldSummary.totalDelta)
 
   const nextResourcesByKingdomId = { ...state.resourcesByKingdomId }
   if (playerFactionId) {
     nextResourcesByKingdomId[playerFactionId] = nextPlayerResources
   }
 
+  const nextTurnNumber = state.turnNumber + 1
+
   return {
     ...state,
     counties: nextCounties,
     resourcesByKingdomId: nextResourcesByKingdomId,
-    turnNumber: state.turnNumber + 1,
+    turnNumber: nextTurnNumber,
     buildQueueByCountyId: {},
+    lastTurnReport: {
+      turnNumber: nextTurnNumber,
+      resourceDeltas: turnYieldSummary.totalDelta,
+      topContributions: turnYieldSummary.contributionLines.slice(0, 5),
+    },
     pendingOrders: [],
   }
 }

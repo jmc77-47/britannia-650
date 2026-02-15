@@ -17,7 +17,7 @@ export interface BuildingDefinition {
   defenseBonus: number
 }
 
-const RESOURCE_KEYS: ResourceKey[] = [
+export const RESOURCE_KEYS: ResourceKey[] = [
   'gold',
   'population',
   'wood',
@@ -46,7 +46,7 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
       wood: 50,
     },
     yieldsPerTurn: {
-      population: 120,
+      population: 2,
     },
     defenseBonus: 0,
   },
@@ -60,7 +60,7 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
       gold: 80,
     },
     yieldsPerTurn: {
-      wood: 24,
+      wood: 3,
     },
     defenseBonus: 0,
   },

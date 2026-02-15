@@ -719,6 +719,77 @@ h1 {
   margin-bottom: 0;
 }
 
+.turn-report-modal {
+  padding: 1rem;
+}
+
+.turn-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.turn-report-header h2 {
+  margin: 0;
+}
+
+.turn-report-body {
+  margin-top: 0.7rem;
+  display: grid;
+  gap: 0.68rem;
+}
+
+.turn-report-turn {
+  margin: 0;
+  color: #eadfbe;
+}
+
+.turn-report-section {
+  border: 1px solid rgba(234, 216, 178, 0.2);
+  border-radius: 10px;
+  padding: 0.58rem;
+  background: rgba(16, 24, 29, 0.42);
+}
+
+.turn-report-section h3 {
+  margin: 0 0 0.38rem;
+  font-size: 0.9rem;
+}
+
+.turn-report-deltas,
+.turn-report-contributors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.32rem;
+}
+
+.turn-report-deltas li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.84rem;
+}
+
+.turn-report-deltas strong {
+  color: #f7e6b6;
+}
+
+.turn-report-contributors li {
+  color: #d8cfb4;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.turn-report-actions {
+  margin-top: 0.72rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .resource-ribbon {
   margin: 0;
   padding: 0;
@@ -1295,6 +1366,52 @@ button:disabled {
   font-size: 0.8rem;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+
+.county-stats-list {
+  margin: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.county-stats-list div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border-bottom: 1px solid rgba(235, 220, 187, 0.14);
+  padding-bottom: 0.2rem;
+}
+
+.county-stats-list dt {
+  color: #d0c6ab;
+  font-size: 0.82rem;
+}
+
+.county-stats-list dd {
+  margin: 0;
+  color: #f1e6c8;
+  font-size: 0.82rem;
+}
+
+.county-yield-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.32rem;
+}
+
+.county-yield-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.56rem;
+  font-size: 0.82rem;
+}
+
+.county-yield-list strong {
+  color: #f8e5b2;
 }
 
 .building-list {
