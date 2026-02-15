@@ -12,7 +12,12 @@ import {
 import { geoMercator, geoPath } from 'd3-geo'
 import { feature as topoFeature, mesh as topoMesh } from 'topojson-client'
 import { MacroPanel, type MacroPanelTab } from './components/MacroPanel'
+import { Modal } from './components/Modal'
 import { gameReducer } from './game/reducer'
+import {
+  CanvasRoadLayer,
+  type RoadRenderModel,
+} from './map/CanvasRoadLayer'
 import {
   assetUrl,
   createInitialGameState,
@@ -80,6 +85,12 @@ interface LoadedMapData {
   countyNeighborIdsByCounty: Record<string, string[]>
 }
 
+interface CountyRoadEdge {
+  id: string
+  countyAId: string
+  countyBId: string
+}
+
 interface TooltipState {
   countyId: string
   x: number
@@ -117,6 +128,11 @@ const normalizeCountyId = (countyId: string | null | undefined): string =>
 const getCountyId = (
   properties: CountyTopologyProperties | null | undefined,
 ): string => normalizeCountyId(properties?.HCS_CODE)
+
+const getCountyPairKey = (countyAId: string, countyBId: string): string =>
+  countyAId < countyBId
+    ? `${countyAId}|${countyBId}`
+    : `${countyBId}|${countyAId}`
 
 const collectArcIndices = (value: unknown, output: number[]) => {
   if (!Array.isArray(value)) {
@@ -201,6 +217,9 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const mapViewportRef = useRef<HTMLDivElement | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
   const dragMovedRef = useRef(false)
+  const settingsButtonRef = useRef<HTMLButtonElement | null>(null)
+  const settingsInitialFocusRef = useRef<HTMLButtonElement | null>(null)
+  const previousSettingsOpenRef = useRef(false)
 
   const [gameState, dispatch] = useReducer(gameReducer, initialGameState)
   const [viewport, setViewport] = useState({ width: 1000, height: 700 })
@@ -209,6 +228,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const [hoveredCountyId, setHoveredCountyId] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [activeTab, setActiveTab] = useState<MacroPanelTab>('BUILD')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [setupCharacterId, setSetupCharacterId] = useState<string | null>(
     initialGameState.availableCharacters[0]?.id ?? null,
   )
@@ -217,6 +237,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const fogRevealFilterId = `${fogIdBase}-reveal-blur`
   const fogRevealHaloFilterId = `${fogIdBase}-reveal-halo`
   const fogTextureFilterId = `${fogIdBase}-texture`
+  const settingsTitleId = `${fogIdBase}-settings-title`
 
   const isSetupPhase = gameState.gamePhase === 'setup'
   const isFogActive = gameState.gamePhase === 'playing' && gameState.fogOfWarEnabled
@@ -287,6 +308,13 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
 
     setSetupCharacterId(gameState.availableCharacters[0]?.id ?? null)
   }, [gameState.availableCharacters, gameState.gamePhase, setupCharacterId])
+
+  useEffect(() => {
+    if (previousSettingsOpenRef.current && !settingsOpen) {
+      settingsButtonRef.current?.focus()
+    }
+    previousSettingsOpenRef.current = settingsOpen
+  }, [settingsOpen])
 
   const clampPan = useCallback(
     (x: number, y: number, scale: number) => {
@@ -509,7 +537,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
 
   const updateTooltip = useCallback(
     (countyId: string, clientX: number, clientY: number) => {
-      if (isDragging || isSetupPhase) {
+      if (isDragging || isSetupPhase || settingsOpen) {
         return
       }
       if (!isCountyDiscovered(countyId)) {
@@ -530,7 +558,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         y: clientY - hostRect.top,
       })
     },
-    [isCountyDiscovered, isDragging, isSetupPhase],
+    [isCountyDiscovered, isDragging, isSetupPhase, settingsOpen],
   )
 
   const closeTooltip = useCallback(() => {
@@ -539,10 +567,10 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   }, [])
 
   useEffect(() => {
-    if (isSetupPhase) {
+    if (isSetupPhase || settingsOpen) {
       closeTooltip()
     }
-  }, [closeTooltip, isSetupPhase])
+  }, [closeTooltip, isSetupPhase, settingsOpen])
 
   const zoomByWheel = useCallback(
     (deltaY: number, clientX: number, clientY: number) => {
@@ -584,7 +612,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     }
 
     const onWheel = (event: WheelEvent) => {
-      if (isSetupPhase) {
+      if (isSetupPhase || settingsOpen) {
         return
       }
 
@@ -596,11 +624,11 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     return () => {
       container.removeEventListener('wheel', onWheel)
     }
-  }, [isSetupPhase, zoomByWheel])
+  }, [isSetupPhase, settingsOpen, zoomByWheel])
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (isSetupPhase || event.button !== 0) {
+      if (isSetupPhase || settingsOpen || event.button !== 0) {
         return
       }
 
@@ -617,7 +645,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       closeTooltip()
       event.currentTarget.setPointerCapture(event.pointerId)
     },
-    [closeTooltip, isSetupPhase, transform.x, transform.y],
+    [closeTooltip, isSetupPhase, settingsOpen, transform.x, transform.y],
   )
 
   const handlePointerMove = useCallback(
@@ -662,7 +690,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
 
   const handleCountyClick = useCallback(
     (countyId: string) => {
-      if (isSetupPhase || dragMovedRef.current) {
+      if (isSetupPhase || settingsOpen || dragMovedRef.current) {
         return
       }
       if (!isCountyDiscovered(countyId)) {
@@ -674,8 +702,88 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         countyId,
       })
     },
-    [isCountyDiscovered, isSetupPhase],
+    [isCountyDiscovered, isSetupPhase, settingsOpen],
   )
+
+  const countyRoadEdges = useMemo<CountyRoadEdge[]>(() => {
+    const edges: CountyRoadEdge[] = []
+
+    Object.entries(mapData.countyNeighborIdsByCounty).forEach(
+      ([countyId, neighbors]) => {
+        neighbors.forEach((neighborId) => {
+          if (countyId >= neighborId) {
+            return
+          }
+
+          edges.push({
+            id: getCountyPairKey(countyId, neighborId),
+            countyAId: countyId,
+            countyBId: neighborId,
+          })
+        })
+      },
+    )
+
+    edges.sort((left, right) => left.id.localeCompare(right.id))
+    return edges
+  }, [mapData.countyNeighborIdsByCounty])
+
+  const roadRenderModels = useMemo<RoadRenderModel[]>(() => {
+    if (isSetupPhase) {
+      return []
+    }
+
+    const countyById = new Map(projectedMap.counties.map((county) => [county.id, county]))
+    const roads: RoadRenderModel[] = []
+
+    countyRoadEdges.forEach((edge) => {
+      if (
+        isFogActive &&
+        (!isCountyDiscovered(edge.countyAId) || !isCountyDiscovered(edge.countyBId))
+      ) {
+        return
+      }
+
+      const countyA = countyById.get(edge.countyAId)
+      const countyB = countyById.get(edge.countyBId)
+      if (!countyA || !countyB) {
+        return
+      }
+
+      const countyARoadLevel = gameState.counties[edge.countyAId]?.roadLevel ?? 1
+      const countyBRoadLevel = gameState.counties[edge.countyBId]?.roadLevel ?? 1
+      const level = gameState.superhighwaysEnabled
+        ? 5
+        : Math.min(countyARoadLevel, countyBRoadLevel)
+      if (level < 1) {
+        return
+      }
+
+      roads.push({
+        id: edge.id,
+        countyAId: edge.countyAId,
+        countyBId: edge.countyBId,
+        level,
+        visibility: 'visible',
+        hubA: countyA.centroid,
+        gate: [
+          (countyA.centroid[0] + countyB.centroid[0]) / 2,
+          (countyA.centroid[1] + countyB.centroid[1]) / 2,
+        ],
+        hubB: countyB.centroid,
+      })
+    })
+
+    return roads
+  }, [
+    countyRoadEdges,
+    gameState.counties,
+    gameState.superhighwaysEnabled,
+    isCountyDiscovered,
+    isFogActive,
+    isSetupPhase,
+    projectedMap.counties,
+  ])
 
   const computeInitialDiscoveredCountyIds = useCallback(
     (startCountyId: string): string[] => {
@@ -726,7 +834,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   return (
     <div className={`MacroRoot${isDragging ? ' is-map-dragging' : ''}`}>
       <div
-        className={`MapCanvas${isSetupPhase ? ' is-obscured' : ''}`}
+        className={`MapCanvas${isSetupPhase || settingsOpen ? ' is-obscured' : ''}`}
         onPointerCancel={finishDrag}
         onPointerDown={handlePointerDown}
         onPointerLeave={finishDrag}
@@ -919,6 +1027,14 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           </g>
         </svg>
 
+        <CanvasRoadLayer
+          roads={roadRenderModels}
+          showRoads={!isSetupPhase}
+          transform={transform}
+          viewportHeight={viewport.height}
+          viewportWidth={viewport.width}
+        />
+
         {!isSetupPhase && tooltip && tooltipCounty && tooltipStyle && !isDragging && (
           <aside className="tooltip" style={tooltipStyle}>
             <h3>{tooltipCounty.name}</h3>
@@ -949,11 +1065,12 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         {!isSetupPhase && (
           <div className="macro-banner-actions">
             <button
-              className="secondary-button macro-fog-toggle-button"
-              onClick={() => dispatch({ type: 'TOGGLE_FOG_OF_WAR' })}
+              className="secondary-button macro-settings-button"
+              onClick={() => setSettingsOpen(true)}
+              ref={settingsButtonRef}
               type="button"
             >
-              Fog of War: {gameState.fogOfWarEnabled ? 'On' : 'Off'}
+              Settings
             </button>
             <button
               className="secondary-button macro-new-game-button"
@@ -975,6 +1092,79 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           turnNumber={gameState.turnNumber}
         />
       )}
+
+      <Modal
+        initialFocusRef={settingsInitialFocusRef}
+        labelledBy={settingsTitleId}
+        onClose={() => setSettingsOpen(false)}
+        open={settingsOpen}
+      >
+        <section className="settings-modal">
+          <header className="settings-modal-header">
+            <h2 id={settingsTitleId}>Settings</h2>
+            <button
+              aria-label="Close settings"
+              className="icon-close-button secondary-button"
+              onClick={() => setSettingsOpen(false)}
+              type="button"
+            >
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </header>
+
+          <div className="settings-modal-body">
+            <section className="settings-section">
+              <h3>Map Debug</h3>
+              <p className="settings-section-copy">
+                These temporary toggles help inspect visibility and route layers.
+              </p>
+
+              <div className="settings-toggle-row">
+                <div className="settings-toggle-copy">
+                  <p className="settings-toggle-label">Fog of War</p>
+                  <p className="settings-toggle-desc">
+                    When Off, all counties are fully revealed.
+                  </p>
+                </div>
+                <div className="settings-toggle-controls">
+                  <button
+                    aria-label={`Fog of War ${gameState.fogOfWarEnabled ? 'On' : 'Off'}`}
+                    aria-pressed={gameState.fogOfWarEnabled}
+                    className={`toggle-switch${gameState.fogOfWarEnabled ? ' is-on' : ''}`}
+                    onClick={() => dispatch({ type: 'TOGGLE_FOG_OF_WAR' })}
+                    ref={settingsInitialFocusRef}
+                    type="button"
+                  >
+                    <span className="toggle-thumb" />
+                  </button>
+                  <strong>{gameState.fogOfWarEnabled ? 'On' : 'Off'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-toggle-row">
+                <div className="settings-toggle-copy">
+                  <p className="settings-toggle-label">Superhighways</p>
+                  <p className="settings-toggle-desc">
+                    Force all visible roads to render at Level 5.
+                  </p>
+                </div>
+                <div className="settings-toggle-controls">
+                  <button
+                    aria-label={`Superhighways ${gameState.superhighwaysEnabled ? 'On' : 'Off'}`}
+                    aria-pressed={gameState.superhighwaysEnabled}
+                    className={`toggle-switch${gameState.superhighwaysEnabled ? ' is-on' : ''}`}
+                    onClick={() => dispatch({ type: 'TOGGLE_SUPERHIGHWAYS' })}
+                    type="button"
+                  >
+                    <span className="toggle-thumb" />
+                  </button>
+                  <strong>{gameState.superhighwaysEnabled ? 'On' : 'Off'}</strong>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </Modal>
 
       {isSetupPhase && (
         <div aria-labelledby="setup-title" aria-modal="true" className="StartOverlay" role="dialog">

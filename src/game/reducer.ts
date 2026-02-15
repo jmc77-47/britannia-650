@@ -20,6 +20,9 @@ export type GameAction =
   | {
       type: 'TOGGLE_FOG_OF_WAR'
     }
+  | {
+      type: 'TOGGLE_SUPERHIGHWAYS'
+    }
 
 const normalizeCountyIdList = (countyIds: string[]): string[] => {
   const uniqueCountyIds = new Set<string>()
@@ -47,6 +50,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionColor: null,
       playerFactionCountyIds: [],
       fogOfWarEnabled: true,
+      superhighwaysEnabled: state.superhighwaysEnabled,
       discoveredCountyIds: [],
       pendingOrders: [],
     }
@@ -88,6 +92,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionColor: kingdom?.color ?? '#f3c94b',
       playerFactionCountyIds,
       fogOfWarEnabled: true,
+      superhighwaysEnabled: state.superhighwaysEnabled,
       discoveredCountyIds,
       pendingOrders: [],
     }
@@ -104,6 +109,13 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       ...state,
       fogOfWarEnabled: nextFogState,
       selectedCountyId: shouldClearSelection ? null : state.selectedCountyId,
+    }
+  }
+
+  if (action.type === 'TOGGLE_SUPERHIGHWAYS') {
+    return {
+      ...state,
+      superhighwaysEnabled: !state.superhighwaysEnabled,
     }
   }
 

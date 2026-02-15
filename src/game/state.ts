@@ -7,6 +7,7 @@ export interface CountyGameState {
   name: string
   buildings: string[]
   prosperity: number
+  roadLevel: number
 }
 
 export interface StartCharacter {
@@ -33,6 +34,7 @@ export interface GameState {
   playerFactionColor: string | null
   playerFactionCountyIds: string[]
   fogOfWarEnabled: boolean
+  superhighwaysEnabled: boolean
   discoveredCountyIds: string[]
   availableCharacters: StartCharacter[]
   kingdoms: KingdomGameState[]
@@ -58,6 +60,7 @@ interface CountyMetadataRecord {
   id?: unknown
   displayName?: unknown
   prosperityBase?: unknown
+  roadLevel?: unknown
 }
 
 interface StartCharacterRecord {
@@ -100,6 +103,9 @@ const fetchJson = async <T>(path: string): Promise<T> => {
   return (await response.json()) as T
 }
 
+const clampInteger = (value: number, min: number, max: number): number =>
+  Math.round(Math.min(max, Math.max(min, value)))
+
 const parseCountyState = (payload: unknown): Record<string, CountyGameState> => {
   if (!payload || typeof payload !== 'object') {
     return {}
@@ -129,12 +135,17 @@ const parseCountyState = (payload: unknown): Record<string, CountyGameState> => 
         Number.isFinite(county.prosperityBase)
           ? county.prosperityBase
           : 0
+      const roadLevelRaw =
+        typeof county.roadLevel === 'number' && Number.isFinite(county.roadLevel)
+          ? county.roadLevel
+          : 1
 
       counties[countyId] = {
         id: countyId,
         name: countyName,
         buildings: [],
         prosperity,
+        roadLevel: clampInteger(roadLevelRaw, 0, 5),
       }
     },
   )
@@ -240,6 +251,7 @@ export const createInitialGameState = async (): Promise<GameState> => {
     playerFactionColor: null,
     playerFactionCountyIds: [],
     fogOfWarEnabled: true,
+    superhighwaysEnabled: false,
     discoveredCountyIds: [],
     availableCharacters: parseStartCharacters(startsPayload),
     kingdoms: parseKingdoms(kingdomsPayload),
