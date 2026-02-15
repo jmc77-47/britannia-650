@@ -279,6 +279,20 @@
   font-size: clamp(1.28rem, 2.5vw, 1.8rem);
 }
 
+.macro-banner-actions {
+  margin-top: 0.58rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.macro-new-game-button {
+  min-width: 7rem;
+  padding-top: 0.44rem;
+  padding-bottom: 0.44rem;
+  font-size: 0.82rem;
+}
+
 .MacroPanel {
   position: fixed;
   top: 1rem;
@@ -1224,6 +1238,21 @@ button:disabled {
 .start-card span {
   color: #f1dfaf;
   font-size: 0.8rem;
+}
+
+.start-card-faction {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+}
+
+.start-card-faction-chip {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 228, 189, 0.45);
+  box-shadow: 0 0 0 1px rgba(11, 18, 23, 0.58) inset;
+  flex: 0 0 auto;
 }
 
 .start-card.is-selected {

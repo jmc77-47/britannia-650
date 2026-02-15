@@ -9,9 +9,69 @@ export type GameAction =
   | {
       type: 'END_TURN'
     }
+  | {
+      type: 'BEGIN_GAME_WITH_CHARACTER'
+      characterId: string
+    }
+  | {
+      type: 'OPEN_SETUP'
+    }
 
 export const gameReducer = (state: GameState, action: GameAction): GameState => {
+  if (action.type === 'OPEN_SETUP') {
+    return {
+      ...state,
+      gamePhase: 'setup',
+      turnNumber: 1,
+      selectedCountyId: null,
+      selectedCharacterId: null,
+      startingCountyId: null,
+      playerFactionId: null,
+      playerFactionName: null,
+      playerFactionColor: null,
+      playerFactionCountyIds: [],
+      pendingOrders: [],
+    }
+  }
+
+  if (action.type === 'BEGIN_GAME_WITH_CHARACTER') {
+    const selectedCharacter = state.availableCharacters.find(
+      (character) => character.id === action.characterId,
+    )
+    if (!selectedCharacter) {
+      return state
+    }
+
+    const startingCountyId = normalizeCountyId(selectedCharacter.startCountyId)
+    const kingdom = state.kingdoms.find((candidateKingdom) =>
+      candidateKingdom.countyIds.includes(startingCountyId),
+    )
+    const playerFactionCountyIds = kingdom
+      ? kingdom.countyIds
+      : startingCountyId
+        ? [startingCountyId]
+        : []
+
+    return {
+      ...state,
+      gamePhase: 'playing',
+      turnNumber: 1,
+      selectedCharacterId: selectedCharacter.id,
+      startingCountyId: startingCountyId || null,
+      selectedCountyId: startingCountyId || null,
+      playerFactionId: kingdom?.id ?? null,
+      playerFactionName: kingdom?.name ?? `${selectedCharacter.name}'s Realm`,
+      playerFactionColor: kingdom?.color ?? '#f3c94b',
+      playerFactionCountyIds,
+      pendingOrders: [],
+    }
+  }
+
   if (action.type === 'SELECT_COUNTY') {
+    if (state.gamePhase !== 'playing') {
+      return state
+    }
+
     const countyId = normalizeCountyId(action.countyId)
     if (!countyId) {
       return {
@@ -27,6 +87,10 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
   }
 
   if (action.type === 'END_TURN') {
+    if (state.gamePhase !== 'playing') {
+      return state
+    }
+
     return resolveTurn(state)
   }
 

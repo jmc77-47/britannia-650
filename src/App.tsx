@@ -26,6 +26,7 @@ const MAP_PADDING = 26
 const COUNTY_BASE_FILL = '#5a6550'
 const COUNTY_HOVER_FILL = '#738260'
 const COUNTY_SELECTED_FILL = '#d8ba66'
+const PLAYER_FACTION_FALLBACK_FILL = '#79c5f0'
 
 interface CountyTopologyProperties {
   NAME?: string
@@ -90,6 +91,15 @@ interface DragState {
   originY: number
 }
 
+interface SetupCharacterCard {
+  id: string
+  name: string
+  startCountyId: string
+  startCountyName: string
+  factionName: string
+  factionColor: string | null
+}
+
 interface MacroGameProps {
   initialGameState: GameState
   mapData: LoadedMapData
@@ -133,6 +143,15 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const [hoveredCountyId, setHoveredCountyId] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [activeTab, setActiveTab] = useState<MacroPanelTab>('BUILD')
+  const [setupCharacterId, setSetupCharacterId] = useState<string | null>(
+    initialGameState.availableCharacters[0]?.id ?? null,
+  )
+
+  const isSetupPhase = gameState.gamePhase === 'setup'
+  const playerFactionCountyIdSet = useMemo(
+    () => new Set(gameState.playerFactionCountyIds),
+    [gameState.playerFactionCountyIds],
+  )
 
   useEffect(() => {
     const body = document.body
@@ -177,6 +196,21 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     observer.observe(container)
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (gameState.gamePhase !== 'setup') {
+      return
+    }
+
+    if (
+      setupCharacterId &&
+      gameState.availableCharacters.some((character) => character.id === setupCharacterId)
+    ) {
+      return
+    }
+
+    setSetupCharacterId(gameState.availableCharacters[0]?.id ?? null)
+  }, [gameState.availableCharacters, gameState.gamePhase, setupCharacterId])
 
   const clampPan = useCallback(
     (x: number, y: number, scale: number) => {
@@ -245,7 +279,13 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       counties,
       borderPath,
     }
-  }, [gameState.counties, mapData.borderMesh, mapData.countyFeatures, viewport.height, viewport.width])
+  }, [
+    gameState.counties,
+    mapData.borderMesh,
+    mapData.countyFeatures,
+    viewport.height,
+    viewport.width,
+  ])
 
   const selectedCounty = useMemo(
     () =>
@@ -265,6 +305,48 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       name: selectedCounty.name,
     }
   }, [selectedCounty])
+
+  const selectedCharacter = useMemo(
+    () =>
+      gameState.selectedCharacterId
+        ? gameState.availableCharacters.find(
+            (character) => character.id === gameState.selectedCharacterId,
+          ) ?? null
+        : null,
+    [gameState.availableCharacters, gameState.selectedCharacterId],
+  )
+
+  const kingdomByCountyId = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; name: string; color: string; countyIds: string[] }
+    >()
+    gameState.kingdoms.forEach((kingdom) => {
+      kingdom.countyIds.forEach((countyId) => {
+        map.set(countyId, kingdom)
+      })
+    })
+    return map
+  }, [gameState.kingdoms])
+
+  const setupCharacterCards = useMemo<SetupCharacterCard[]>(
+    () =>
+      gameState.availableCharacters.map((character) => {
+        const startCountyId = normalizeCountyId(character.startCountyId)
+        const startCountyName =
+          gameState.counties[startCountyId]?.name ?? startCountyId
+        const kingdom = kingdomByCountyId.get(startCountyId) ?? null
+        return {
+          id: character.id,
+          name: character.name,
+          startCountyId,
+          startCountyName,
+          factionName: kingdom?.name ?? 'Independent Banner',
+          factionColor: kingdom?.color ?? null,
+        }
+      }),
+    [gameState.availableCharacters, gameState.counties, kingdomByCountyId],
+  )
 
   const tooltipCounty = useMemo(
     () =>
@@ -300,17 +382,29 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       if (county.id === gameState.selectedCountyId) {
         return COUNTY_SELECTED_FILL
       }
+      if (
+        gameState.gamePhase === 'playing' &&
+        playerFactionCountyIdSet.has(county.id)
+      ) {
+        return gameState.playerFactionColor ?? PLAYER_FACTION_FALLBACK_FILL
+      }
       if (county.id === hoveredCountyId) {
         return COUNTY_HOVER_FILL
       }
       return COUNTY_BASE_FILL
     },
-    [gameState.selectedCountyId, hoveredCountyId],
+    [
+      gameState.gamePhase,
+      gameState.playerFactionColor,
+      gameState.selectedCountyId,
+      hoveredCountyId,
+      playerFactionCountyIdSet,
+    ],
   )
 
   const updateTooltip = useCallback(
     (countyId: string, clientX: number, clientY: number) => {
-      if (isDragging) {
+      if (isDragging || isSetupPhase) {
         return
       }
 
@@ -326,13 +420,19 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         y: clientY - hostRect.top,
       })
     },
-    [isDragging],
+    [isDragging, isSetupPhase],
   )
 
   const closeTooltip = useCallback(() => {
     setHoveredCountyId(null)
     setTooltip(null)
   }, [])
+
+  useEffect(() => {
+    if (isSetupPhase) {
+      closeTooltip()
+    }
+  }, [closeTooltip, isSetupPhase])
 
   const zoomByWheel = useCallback(
     (deltaY: number, clientX: number, clientY: number) => {
@@ -374,6 +474,10 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     }
 
     const onWheel = (event: WheelEvent) => {
+      if (isSetupPhase) {
+        return
+      }
+
       event.preventDefault()
       zoomByWheel(event.deltaY, event.clientX, event.clientY)
     }
@@ -382,11 +486,11 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     return () => {
       container.removeEventListener('wheel', onWheel)
     }
-  }, [zoomByWheel])
+  }, [isSetupPhase, zoomByWheel])
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (event.button !== 0) {
+      if (isSetupPhase || event.button !== 0) {
         return
       }
 
@@ -403,7 +507,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       closeTooltip()
       event.currentTarget.setPointerCapture(event.pointerId)
     },
-    [closeTooltip, transform.x, transform.y],
+    [closeTooltip, isSetupPhase, transform.x, transform.y],
   )
 
   const handlePointerMove = useCallback(
@@ -446,21 +550,40 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     setIsDragging(false)
   }, [])
 
-  const handleCountyClick = useCallback((countyId: string) => {
-    if (dragMovedRef.current) {
+  const handleCountyClick = useCallback(
+    (countyId: string) => {
+      if (isSetupPhase || dragMovedRef.current) {
+        return
+      }
+
+      dispatch({
+        type: 'SELECT_COUNTY',
+        countyId,
+      })
+    },
+    [isSetupPhase],
+  )
+
+  const beginCampaign = useCallback(() => {
+    if (!setupCharacterId) {
       return
     }
 
     dispatch({
-      type: 'SELECT_COUNTY',
-      countyId,
+      type: 'BEGIN_GAME_WITH_CHARACTER',
+      characterId: setupCharacterId,
     })
-  }, [])
+  }, [setupCharacterId])
+
+  const openSetup = useCallback(() => {
+    setSetupCharacterId(gameState.availableCharacters[0]?.id ?? null)
+    dispatch({ type: 'OPEN_SETUP' })
+  }, [gameState.availableCharacters])
 
   return (
     <div className={`MacroRoot${isDragging ? ' is-map-dragging' : ''}`}>
       <div
-        className="MapCanvas"
+        className={`MapCanvas${isSetupPhase ? ' is-obscured' : ''}`}
         onPointerCancel={finishDrag}
         onPointerDown={handlePointerDown}
         onPointerLeave={finishDrag}
@@ -488,25 +611,47 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
 
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.scale})`}>
             <g className="county-layer">
-              {projectedMap.counties.map((county) => (
-                <path
-                  className={`county-fill${hoveredCountyId === county.id ? ' is-hovered' : ''}${
-                    gameState.selectedCountyId === county.id ? ' is-selected' : ''
-                  }`}
-                  d={county.d}
-                  fill={getCountyFill(county)}
-                  key={county.id}
-                  onClick={() => handleCountyClick(county.id)}
-                  onMouseEnter={(event) =>
-                    updateTooltip(county.id, event.clientX, event.clientY)
-                  }
-                  onMouseLeave={closeTooltip}
-                  onMouseMove={(event) =>
-                    updateTooltip(county.id, event.clientX, event.clientY)
-                  }
-                />
-              ))}
+              {projectedMap.counties.map((county) => {
+                const isPlayerCounty = playerFactionCountyIdSet.has(county.id)
+                return (
+                  <path
+                    className={`county-fill${hoveredCountyId === county.id ? ' is-hovered' : ''}${
+                      gameState.selectedCountyId === county.id ? ' is-selected' : ''
+                    }${isPlayerCounty ? ' is-player-owned' : ''}`}
+                    d={county.d}
+                    fill={getCountyFill(county)}
+                    key={county.id}
+                    onClick={() => handleCountyClick(county.id)}
+                    onMouseEnter={(event) =>
+                      updateTooltip(county.id, event.clientX, event.clientY)
+                    }
+                    onMouseLeave={closeTooltip}
+                    onMouseMove={(event) =>
+                      updateTooltip(county.id, event.clientX, event.clientY)
+                    }
+                  />
+                )
+              })}
             </g>
+
+            {gameState.gamePhase === 'playing' && (
+              <g className="player-county-layer">
+                {projectedMap.counties
+                  .filter((county) => playerFactionCountyIdSet.has(county.id))
+                  .map((county) => (
+                    <g key={`player-county-${county.id}`}>
+                      <path
+                        className="player-county-glow"
+                        d={county.d}
+                        style={{
+                          stroke: gameState.playerFactionColor ?? PLAYER_FACTION_FALLBACK_FILL,
+                        }}
+                      />
+                      <path className="player-county-outline" d={county.d} />
+                    </g>
+                  ))}
+              </g>
+            )}
 
             {projectedMap.borderPath && (
               <g className="borders-layer">
@@ -522,7 +667,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           </g>
         </svg>
 
-        {tooltip && tooltipCounty && tooltipStyle && !isDragging && (
+        {!isSetupPhase && tooltip && tooltipCounty && tooltipStyle && !isDragging && (
           <aside className="tooltip" style={tooltipStyle}>
             <h3>{tooltipCounty.name}</h3>
             <p>
@@ -538,17 +683,90 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
 
       <header className="HudPanel MacroBanner">
         <p className="hud-eyebrow">Dark Ages 650 AD</p>
-        <h1>Macro Campaign</h1>
-        <p className="subtle">Click a county to select it, then end the turn.</p>
+        <h1>{isSetupPhase ? 'Choose Your Character' : 'Macro Campaign'}</h1>
+        {isSetupPhase ? (
+          <p className="subtle">
+            Select Alphonsus, Douglas, Edmund, or Ulmann to begin your campaign.
+          </p>
+        ) : (
+          <p className="subtle">
+            Character: <strong>{selectedCharacter?.name ?? 'Unknown'}</strong> | Faction:{' '}
+            <strong>{gameState.playerFactionName ?? 'Unknown banner'}</strong>
+          </p>
+        )}
+        {!isSetupPhase && (
+          <div className="macro-banner-actions">
+            <button
+              className="secondary-button macro-new-game-button"
+              onClick={openSetup}
+              type="button"
+            >
+              New Game
+            </button>
+          </div>
+        )}
       </header>
 
-      <MacroPanel
-        activeTab={activeTab}
-        onEndTurn={() => dispatch({ type: 'END_TURN' })}
-        onTabChange={setActiveTab}
-        selectedCounty={selectedCountyForPanel}
-        turnNumber={gameState.turnNumber}
-      />
+      {gameState.gamePhase === 'playing' && (
+        <MacroPanel
+          activeTab={activeTab}
+          onEndTurn={() => dispatch({ type: 'END_TURN' })}
+          onTabChange={setActiveTab}
+          selectedCounty={selectedCountyForPanel}
+          turnNumber={gameState.turnNumber}
+        />
+      )}
+
+      {isSetupPhase && (
+        <div aria-labelledby="setup-title" aria-modal="true" className="StartOverlay" role="dialog">
+          <div className="start-backdrop" />
+          <section className="start-modal">
+            <p className="hud-eyebrow">Game Setup</p>
+            <h2 id="setup-title">Select Your Starting Character</h2>
+            <p className="subtle">
+              Your selection sets your opening county and faction allegiance.
+            </p>
+            <div className="start-cards">
+              {setupCharacterCards.map((character) => {
+                const isSelected = setupCharacterId === character.id
+                return (
+                  <button
+                    className={`start-card${isSelected ? ' is-selected' : ''}`}
+                    key={character.id}
+                    onClick={() => setSetupCharacterId(character.id)}
+                    type="button"
+                  >
+                    <h3>{character.name}</h3>
+                    <p>
+                      Start: {character.startCountyName}{' '}
+                      <span className="county-code">{character.startCountyId}</span>
+                    </p>
+                    <p className="start-card-faction">
+                      Faction:
+                      <span
+                        className="start-card-faction-chip"
+                        style={{
+                          backgroundColor: character.factionColor ?? '#65727d',
+                        }}
+                      />
+                      {character.factionName}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+            <div className="start-actions">
+              <button
+                disabled={!setupCharacterId || setupCharacterCards.length === 0}
+                onClick={beginCampaign}
+                type="button"
+              >
+                Begin Campaign
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }
