@@ -65,6 +65,7 @@ import {
   CanvasRoadLayer,
   type RoadRenderModel,
 } from './map/CanvasRoadLayer'
+import { CountyMarkers, type CountyMarkerKind } from './components/map/CountyMarkers'
 import {
   createInitialGameState,
   type CountyBuildOrder,
@@ -77,6 +78,7 @@ import './App.css'
 
 const TOPOLOGY_PATH = 'data/counties_gb_s05.topo.json'
 const ADJACENCY_OVERRIDES_PATH = 'data/adjacency_overrides.json'
+const DEEPWATER_PORTS_PATH = 'data/deepwater_ports.json'
 const MIN_ZOOM = 1
 const MAX_ZOOM = 6
 const MAP_PADDING = 26
@@ -124,6 +126,11 @@ interface AdjacencyOverridesPayload {
   edges?: unknown
 }
 
+interface DeepwaterPortsPayload {
+  ports?: unknown
+  deepwaterPorts?: unknown
+}
+
 interface CountyFeature {
   type: string
   properties?: CountyTopologyProperties | null
@@ -150,6 +157,7 @@ interface LoadedMapData {
   countyFeatures: CountyFeatureCollection
   borderMesh: BorderGeometry | null
   countyNeighborIdsByCounty: Record<string, string[]>
+  deepwaterPortIds: string[]
 }
 
 interface CountyRoadEdge {
@@ -260,6 +268,32 @@ const parseAdjacencyOverrideEdges = (payload: unknown): [string, string][] => {
   })
 
   return overrideEdges
+}
+
+const parseDeepwaterPortIds = (payload: unknown): string[] => {
+  if (!payload || typeof payload !== 'object') {
+    return []
+  }
+
+  const rawPorts =
+    (payload as DeepwaterPortsPayload).ports ??
+    (payload as DeepwaterPortsPayload).deepwaterPorts
+  if (!Array.isArray(rawPorts)) {
+    return []
+  }
+
+  const portIds = new Set<string>()
+  rawPorts.forEach((rawPortId) => {
+    if (typeof rawPortId !== 'string') {
+      return
+    }
+    const countyId = normalizeCountyId(rawPortId)
+    if (countyId) {
+      portIds.add(countyId)
+    }
+  })
+
+  return [...portIds]
 }
 
 const mergeAdjacencyOverrides = (
@@ -1192,6 +1226,18 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       null,
     [projectedMap.counties, tooltip?.countyId],
   )
+  const tooltipCountyState = useMemo(
+    () => (tooltipCounty ? gameState.counties[tooltipCounty.id] ?? null : null),
+    [gameState.counties, tooltipCounty],
+  )
+  const tooltipCountyStats = useMemo(
+    () => (tooltipCountyState ? getCountyDerivedStats(tooltipCountyState) : null),
+    [tooltipCountyState],
+  )
+  const tooltipOwnerName = useMemo(
+    () => getOwnerDisplayName(tooltipCountyState?.ownerId),
+    [getOwnerDisplayName, tooltipCountyState?.ownerId],
+  )
 
   const tooltipStyle = useMemo<CSSProperties | undefined>(() => {
     if (!tooltip) {
@@ -1524,6 +1570,83 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     selectedCountyState?.population,
     gameState.noConquestEnabled,
   ])
+
+  const deepwaterPortIdSet = useMemo(
+    () => new Set(mapData.deepwaterPortIds.map((countyId) => normalizeCountyId(countyId))),
+    [mapData.deepwaterPortIds],
+  )
+
+  const portMarkers = useMemo(
+    () =>
+      projectedMap.counties
+        .filter(
+          (county) => isCountyVisible(county.id) && deepwaterPortIdSet.has(county.id),
+        )
+        .map((county) => {
+          const countyOwnerId = gameState.counties[county.id]?.ownerId ?? NEUTRAL_OWNER_ID
+          return {
+            countyId: county.id,
+            centroid: county.centroid,
+            muted: countyOwnerId !== playerFactionId,
+          }
+        }),
+    [deepwaterPortIdSet, gameState.counties, isCountyVisible, playerFactionId, projectedMap.counties],
+  )
+
+  const countyBuildingMarkers = useMemo(() => {
+    const priorityChecks: Array<{
+      kind: CountyMarkerKind
+      include: (countyId: string) => boolean
+    }> = [
+      {
+        kind: 'PALISADE',
+        include: (countyId) => (gameState.counties[countyId]?.buildings.PALISADE ?? 0) >= 1,
+      },
+      {
+        kind: 'MARKET',
+        include: (countyId) => (gameState.counties[countyId]?.buildings.MARKET ?? 0) >= 1,
+      },
+      {
+        kind: 'FARM',
+        include: (countyId) => (gameState.counties[countyId]?.buildings.FARM ?? 0) >= 1,
+      },
+      {
+        kind: 'LUMBER_CAMP',
+        include: (countyId) =>
+          (gameState.counties[countyId]?.buildings.LUMBER_CAMP ?? 0) >= 1,
+      },
+      {
+        kind: 'MINE',
+        include: (countyId) => (gameState.counties[countyId]?.buildings.MINE ?? 0) >= 1,
+      },
+      {
+        kind: 'QUARRY',
+        include: (countyId) => (gameState.counties[countyId]?.buildings.QUARRY ?? 0) >= 1,
+      },
+    ]
+
+    return projectedMap.counties
+      .filter((county) => isCountyVisible(county.id))
+      .map((county) => {
+        const markerKinds = priorityChecks
+          .filter((entry) => entry.include(county.id))
+          .map((entry) => entry.kind)
+
+        if (markerKinds.length === 0) {
+          return null
+        }
+
+        const countyOwnerId = gameState.counties[county.id]?.ownerId ?? NEUTRAL_OWNER_ID
+        return {
+          countyId: county.id,
+          centroid: county.centroid,
+          markerKinds: markerKinds.slice(0, 4),
+          overflowCount: Math.max(0, markerKinds.length - 4),
+          muted: countyOwnerId !== playerFactionId,
+        }
+      })
+      .filter((countyMarker): countyMarker is NonNullable<typeof countyMarker> => !!countyMarker)
+  }, [gameState.counties, isCountyVisible, playerFactionId, projectedMap.counties])
 
   const countyRoadEdges = useMemo<CountyRoadEdge[]>(() => {
     const edges: CountyRoadEdge[] = []
@@ -1942,36 +2065,17 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
               </g>
             )}
 
-            {gameState.gamePhase === 'playing' && (
-              <g className="fortified-city-layer">
-                {projectedMap.counties
-                  .filter((county) => {
-                    if (!isCountyVisible(county.id)) {
-                      return false
-                    }
-                    return (gameState.counties[county.id]?.buildings.PALISADE ?? 0) >= 1
-                  })
-                  .map((county) => (
-                    <g
-                      className="fortified-city-marker"
-                      key={`fortified-city-${county.id}`}
-                      pointerEvents="none"
-                      transform={`translate(${county.centroid[0]} ${county.centroid[1]})`}
-                    >
-                      <circle className="fortified-city-base" r="7.2" />
-                      <rect className="fortified-city-keep" height="8.4" rx="0.9" width="9.2" x="-4.6" y="-6.9" />
-                      <rect className="fortified-city-crenel" height="2.4" rx="0.45" width="2.6" x="-5.1" y="-9.7" />
-                      <rect className="fortified-city-crenel" height="2.4" rx="0.45" width="2.6" x="-1.3" y="-9.7" />
-                      <rect className="fortified-city-crenel" height="2.4" rx="0.45" width="2.6" x="2.5" y="-9.7" />
-                    </g>
-                  ))}
-              </g>
-            )}
-
             {projectedMap.borderPath && (
               <g className="borders-layer">
                 <path className="borders-path" d={projectedMap.borderPath} />
               </g>
+            )}
+
+            {gameState.gamePhase === 'playing' && (
+              <CountyMarkers
+                countyMarkers={countyBuildingMarkers}
+                portMarkers={portMarkers}
+              />
             )}
 
             {selectedCounty && (
@@ -2012,15 +2116,37 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           viewportWidth={viewport.width}
         />
 
-        {!isSetupPhase && tooltip && tooltipCounty && tooltipStyle && !isDragging && (
+        {!isSetupPhase &&
+          tooltip &&
+          tooltipCounty &&
+          tooltipStyle &&
+          !isDragging &&
+          isCountyVisible(tooltipCounty.id) && (
           <aside className="tooltip" style={tooltipStyle}>
             <h3>{tooltipCounty.name}</h3>
             <p>
               <strong>County ID:</strong> {tooltipCounty.id}
             </p>
             <p>
-              <strong>Prosperity:</strong>{' '}
-              {gameState.counties[tooltipCounty.id]?.prosperity ?? 0}
+              <strong>Owner:</strong> {tooltipOwnerName}
+            </p>
+            <p>
+              <strong>Pop:</strong>{' '}
+              {tooltipCountyStats
+                ? `${tooltipCountyStats.population} / ${tooltipCountyStats.populationCap}`
+                : 'Unknown'}
+            </p>
+            <p>
+              <strong>Defense:</strong>{' '}
+              {tooltipCountyState
+                ? getCountyDefenseFromBuildingLevels(tooltipCountyState.buildings)
+                : 'Unknown'}
+            </p>
+            <p>
+              <strong>Roads:</strong> L{tooltipCountyState?.roadLevel ?? 0}
+            </p>
+            <p>
+              <strong>Prosperity:</strong> {tooltipCountyState?.prosperity ?? 0}
             </p>
           </aside>
         )}
@@ -2299,11 +2425,17 @@ function App() {
 
       try {
         const toAssetUrl = assetUrl(import.meta.env.BASE_URL)
-        const [topologyData, initialState, adjacencyOverridesPayload] =
+        const [
+          topologyData,
+          initialState,
+          adjacencyOverridesPayload,
+          deepwaterPortsPayload,
+        ] =
           await Promise.all([
           fetchJson<TopologyData>(toAssetUrl(TOPOLOGY_PATH)),
           createInitialGameState(),
           fetchJson<unknown>(toAssetUrl(ADJACENCY_OVERRIDES_PATH)),
+          fetchJson<unknown>(toAssetUrl(DEEPWATER_PORTS_PATH)),
         ])
 
         const objectName = Object.keys(topologyData.objects)[0]
@@ -2334,6 +2466,7 @@ function App() {
           countyFeatures,
           borderMesh,
           countyNeighborIdsByCounty,
+          deepwaterPortIds: parseDeepwaterPortIds(deepwaterPortsPayload),
         })
         setInitialGameState(initialState)
       } catch (error) {
