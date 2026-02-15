@@ -33,10 +33,30 @@ export interface StorageRiskEntry {
   cap: number
 }
 
+export type CountyOwnershipKind = 'none' | 'owned' | 'neutral' | 'enemy'
+
+export interface CountyActionPanelState {
+  mode: 'claim' | 'conquer'
+  isAdjacent: boolean
+  turnsRequired: number
+  costLabel: string
+  populationCost: number
+  populationCostLabel: string
+  sourceCountyId: string | null
+  sourceCountyName: string | null
+  sourceCountyPopulation: number | null
+  activeOrder: CountyBuildOrder | null
+  canStart: boolean
+  disabledReason?: string
+}
+
 interface MacroPanelProps {
   turnNumber: number
   selectedCounty: MacroPanelCounty | null
   selectedCountyOwned: boolean
+  selectedCountyOwnershipKind: CountyOwnershipKind
+  selectedCountyOwnerLabel: string
+  selectedCountyActionPanel: CountyActionPanelState | null
   selectedCountyBuildingLevels: Record<BuildingType, number>
   selectedCountyDefense: number
   selectedCountyRoadLevel: number
@@ -61,6 +81,8 @@ interface MacroPanelProps {
   warehouseQueuedOrders: CountyBuildOrder[]
   storageRiskEntries: StorageRiskEntry[]
   onQueueTrackUpgrade: (trackType: UpgradeTrackType) => void
+  onQueueClaimCounty: () => void
+  onQueueConquerCounty: () => void
   onQueueWarehouseUpgrade: () => void
   onRemoveQueuedBuildOrder: (queueIndex: number) => void
   onRemoveQueuedWarehouseOrder: (queueIndex: number) => void
@@ -136,6 +158,9 @@ export function MacroPanel({
   turnNumber,
   selectedCounty,
   selectedCountyOwned,
+  selectedCountyOwnershipKind,
+  selectedCountyOwnerLabel,
+  selectedCountyActionPanel,
   selectedCountyBuildingLevels,
   selectedCountyDefense,
   selectedCountyRoadLevel,
@@ -160,6 +185,8 @@ export function MacroPanel({
   warehouseQueuedOrders,
   storageRiskEntries,
   onQueueTrackUpgrade,
+  onQueueClaimCounty,
+  onQueueConquerCounty,
   onQueueWarehouseUpgrade,
   onRemoveQueuedBuildOrder,
   onRemoveQueuedWarehouseOrder,
@@ -193,6 +220,10 @@ export function MacroPanel({
       return 0
     }
 
+    if (activeBuildOrder.kind !== 'UPGRADE_TRACK') {
+      return 0
+    }
+
     if (activeBuildOrder.trackType === 'ROADS') {
       return selectedCountyRoadLevel
     }
@@ -203,6 +234,16 @@ export function MacroPanel({
 
     return selectedCountyBuildingLevels[activeBuildOrder.trackType] ?? 0
   })()
+
+  const getOrderLabel = (order: CountyBuildOrder): string => {
+    if (order.kind === 'UPGRADE_TRACK') {
+      return TRACK_LABEL_BY_ID[order.trackType]
+    }
+    if (order.kind === 'CLAIM_COUNTY') {
+      return 'Claim County'
+    }
+    return 'Conquer County'
+  }
 
   const workforceEfficiency =
     selectedCountyPopulationUsed <= 0
@@ -453,9 +494,21 @@ export function MacroPanel({
                 )}
               </h3>
               <span
-                className={`ownership-pill${selectedCountyOwned ? ' is-owned' : ' is-foreign'}`}
+                className={`ownership-pill${
+                  selectedCountyOwnershipKind === 'owned'
+                    ? ' is-owned'
+                    : selectedCountyOwnershipKind === 'neutral'
+                      ? ' is-neutral'
+                      : ' is-foreign'
+                }`}
               >
-                {selectedCountyOwned ? 'Owned' : 'Not owned'}
+                {selectedCountyOwnershipKind === 'owned'
+                  ? 'Owned'
+                  : selectedCountyOwnershipKind === 'neutral'
+                    ? 'Unclaimed'
+                    : selectedCountyOwnershipKind === 'enemy'
+                      ? selectedCountyOwnerLabel
+                      : 'No selection'}
               </span>
             </div>
 
@@ -493,9 +546,15 @@ export function MacroPanel({
 
             <div className="overview-inline-note">
               {activeBuildOrder ? (
-                <span>
-                  Active: {TRACK_LABEL_BY_ID[activeBuildOrder.trackType]} L{activeOrderTrackLevel} → L{Math.min(MAX_TRACK_LEVEL, activeOrderTrackLevel + 1)} ({activeBuildOrder.turnsRemaining} turn{activeBuildOrder.turnsRemaining === 1 ? '' : 's'} left)
-                </span>
+                activeBuildOrder.kind === 'UPGRADE_TRACK' ? (
+                  <span>
+                    Active: {TRACK_LABEL_BY_ID[activeBuildOrder.trackType]} L{activeOrderTrackLevel} → L{Math.min(MAX_TRACK_LEVEL, activeOrderTrackLevel + 1)} ({activeBuildOrder.turnsRemaining} turn{activeBuildOrder.turnsRemaining === 1 ? '' : 's'} left)
+                  </span>
+                ) : (
+                  <span>
+                    Active: {getOrderLabel(activeBuildOrder)} ({activeBuildOrder.turnsRemaining} turn{activeBuildOrder.turnsRemaining === 1 ? '' : 's'} left)
+                  </span>
+                )
               ) : (
                 <span>No active county build.</span>
               )}
@@ -518,89 +577,180 @@ export function MacroPanel({
 
         {openSections.build && (
           <div className="panel-section-body">
-            <div className="build-tab-list" role="tablist" aria-label="Build view tabs">
-              <button
-                aria-selected={buildView === 'RECOMMENDED'}
-                className={`secondary-button build-tab-button${buildView === 'RECOMMENDED' ? ' is-active' : ''}`}
-                onClick={() => setBuildView('RECOMMENDED')}
-                role="tab"
-                type="button"
-              >
-                Recommended
-              </button>
-              <button
-                aria-selected={buildView === 'ALL'}
-                className={`secondary-button build-tab-button${buildView === 'ALL' ? ' is-active' : ''}`}
-                onClick={() => setBuildView('ALL')}
-                role="tab"
-                type="button"
-              >
-                All
-              </button>
-            </div>
+            {selectedCountyOwnershipKind === 'owned' ? (
+              <>
+                <div className="build-tab-list" role="tablist" aria-label="Build view tabs">
+                  <button
+                    aria-selected={buildView === 'RECOMMENDED'}
+                    className={`secondary-button build-tab-button${buildView === 'RECOMMENDED' ? ' is-active' : ''}`}
+                    onClick={() => setBuildView('RECOMMENDED')}
+                    role="tab"
+                    type="button"
+                  >
+                    Recommended
+                  </button>
+                  <button
+                    aria-selected={buildView === 'ALL'}
+                    className={`secondary-button build-tab-button${buildView === 'ALL' ? ' is-active' : ''}`}
+                    onClick={() => setBuildView('ALL')}
+                    role="tab"
+                    type="button"
+                  >
+                    All
+                  </button>
+                </div>
 
-            {buildView === 'RECOMMENDED' ? (
-              !hasSelectedCounty || !selectedCountyOwned ? (
-                <p className="queue-empty">Select an owned county to build.</p>
-              ) : recommendations.length === 0 ? (
-                <p className="queue-empty">No high-priority recommendation right now.</p>
-              ) : (
-                <ul className="upgrade-card-list">
-                  {recommendations.map((recommendation) => {
-                    if (recommendation.kind === 'warehouse') {
-                      return renderWarehouseRow(recommendation.reason)
-                    }
+                {buildView === 'RECOMMENDED' ? (
+                  !hasSelectedCounty || !selectedCountyOwned ? (
+                    <p className="queue-empty">Select an owned county to build.</p>
+                  ) : recommendations.length === 0 ? (
+                    <p className="queue-empty">No high-priority recommendation right now.</p>
+                  ) : (
+                    <ul className="upgrade-card-list">
+                      {recommendations.map((recommendation) => {
+                        if (recommendation.kind === 'warehouse') {
+                          return renderWarehouseRow(recommendation.reason)
+                        }
 
-                    const recommendationTrack = recommendation.trackType
-                      ? trackByType.get(recommendation.trackType)
-                      : undefined
-                    if (!recommendationTrack) {
-                      return null
-                    }
+                        const recommendationTrack = recommendation.trackType
+                          ? trackByType.get(recommendation.trackType)
+                          : undefined
+                        if (!recommendationTrack) {
+                          return null
+                        }
 
-                    return renderTrackRow(recommendationTrack, recommendation.reason)
-                  })}
-                </ul>
-              )
-            ) : !hasSelectedCounty || !selectedCountyOwned ? (
-              <p className="queue-empty">Select an owned county to view full build tracks.</p>
-            ) : (
-              <div className="all-tracks-groups">
-                {groupedTracks.map((group) => (
-                  <section className="track-group" key={`track-group-${group.title}`}>
-                    <h4>{group.title}</h4>
-                    <ul className="upgrade-card-list compact">
-                      {group.tracks.map((track) => renderTrackRow(track))}
+                        return renderTrackRow(recommendationTrack, recommendation.reason)
+                      })}
                     </ul>
-                  </section>
-                ))}
-              </div>
-            )}
+                  )
+                ) : !hasSelectedCounty || !selectedCountyOwned ? (
+                  <p className="queue-empty">Select an owned county to view full build tracks.</p>
+                ) : (
+                  <div className="all-tracks-groups">
+                    {groupedTracks.map((group) => (
+                      <section className="track-group" key={`track-group-${group.title}`}>
+                        <h4>{group.title}</h4>
+                        <ul className="upgrade-card-list compact">
+                          {group.tracks.map((track) => renderTrackRow(track))}
+                        </ul>
+                      </section>
+                    ))}
+                  </div>
+                )}
 
-            <div className="development-block queue-block-compact">
-              <p className="development-subheading">Queued</p>
-              {queuedBuildOrders.length > 0 ? (
-                <ul className="queue-list">
-                  {queuedBuildOrders.map((order, queueIndex) => (
-                    <li className="queue-item" key={order.id}>
-                      <div>
-                        <strong>{TRACK_LABEL_BY_ID[order.trackType]}</strong>
-                        <span>{order.turnsRemaining} turn(s)</span>
-                      </div>
-                      <button
-                        className="secondary-button queue-remove-button"
-                        onClick={() => onRemoveQueuedBuildOrder(queueIndex)}
-                        type="button"
-                      >
-                        Remove
-                      </button>
-                    </li>
+                <div className="development-block queue-block-compact">
+                  <p className="development-subheading">Queued</p>
+                  {queuedBuildOrders.length > 0 ? (
+                    <ul className="queue-list">
+                      {queuedBuildOrders.map((order, queueIndex) => (
+                        <li className="queue-item" key={order.id}>
+                          <div>
+                            <strong>{getOrderLabel(order)}</strong>
+                            <span>{order.turnsRemaining} turn(s)</span>
+                          </div>
+                          <button
+                            className="secondary-button queue-remove-button"
+                            onClick={() => onRemoveQueuedBuildOrder(queueIndex)}
+                            type="button"
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="queue-empty">No queued county upgrades.</p>
+                  )}
+                </div>
+              </>
+            ) : !hasSelectedCounty ? (
+              <p className="queue-empty">Select a county to view available actions.</p>
+            ) : selectedCountyActionPanel ? (
+              <div className="development-block county-action-panel">
+                <p className="development-subheading">
+                  {selectedCountyActionPanel.mode === 'claim'
+                    ? 'Unclaimed County'
+                    : `Controlled by ${selectedCountyOwnerLabel}`}
+                </p>
+                <p className="subtle">
+                  Adjacent to your realm:{' '}
+                  <strong>{selectedCountyActionPanel.isAdjacent ? 'Yes' : 'No'}</strong>
+                </p>
+                <p className="subtle">
+                  Source:{' '}
+                  <strong>
+                    {selectedCountyActionPanel.sourceCountyName
+                      ? `${selectedCountyActionPanel.sourceCountyName}${
+                          selectedCountyActionPanel.sourceCountyId
+                            ? ` (${selectedCountyActionPanel.sourceCountyId})`
+                            : ''
+                        }`
+                      : 'None'}
+                  </strong>
+                </p>
+                {selectedCountyActionPanel.sourceCountyPopulation !== null && (
+                  <p className="subtle">
+                    {selectedCountyActionPanel.populationCostLabel} available:{' '}
+                    <strong>{selectedCountyActionPanel.sourceCountyPopulation}</strong>
+                  </p>
+                )}
+
+                <div className="upgrade-card-chips county-action-chips">
+                  {toCostChips(selectedCountyActionPanel.costLabel).map((chip) => (
+                    <span className="upgrade-chip" key={`county-action-cost-${chip}`}>
+                      {chip}
+                    </span>
                   ))}
-                </ul>
-              ) : (
-                <p className="queue-empty">No queued county upgrades.</p>
-              )}
-            </div>
+                  <span className="upgrade-chip">
+                    {selectedCountyActionPanel.populationCostLabel}{' '}
+                    {selectedCountyActionPanel.populationCost}
+                  </span>
+                  <span className="upgrade-chip is-turns">
+                    {selectedCountyActionPanel.turnsRequired} turn
+                    {selectedCountyActionPanel.turnsRequired === 1 ? '' : 's'}
+                  </span>
+                </div>
+
+                {selectedCountyActionPanel.activeOrder ? (
+                  <p className="upgrade-card-reason">
+                    {selectedCountyActionPanel.mode === 'claim'
+                      ? 'Claiming'
+                      : 'Conquering'}
+                    ... ({selectedCountyActionPanel.activeOrder.turnsRemaining} turn
+                    {selectedCountyActionPanel.activeOrder.turnsRemaining === 1
+                      ? ''
+                      : 's'}{' '}
+                    remaining)
+                  </p>
+                ) : (
+                  selectedCountyActionPanel.disabledReason && (
+                    <p className="upgrade-disabled-reason">
+                      {selectedCountyActionPanel.disabledReason}
+                    </p>
+                  )
+                )}
+
+                <button
+                  className="macro-end-turn-button county-action-button"
+                  disabled={
+                    !selectedCountyActionPanel.canStart ||
+                    !!selectedCountyActionPanel.activeOrder
+                  }
+                  onClick={() =>
+                    selectedCountyActionPanel.mode === 'claim'
+                      ? onQueueClaimCounty()
+                      : onQueueConquerCounty()
+                  }
+                  type="button"
+                >
+                  {selectedCountyActionPanel.mode === 'claim'
+                    ? 'Claim County'
+                    : 'Conquer County'}
+                </button>
+              </div>
+            ) : (
+              <p className="queue-empty">No county action available.</p>
+            )}
           </div>
         )}
       </section>
@@ -703,7 +853,7 @@ export function MacroPanel({
               {warehouseActiveOrder ? (
                 <div className="queue-item">
                   <div>
-                    <strong>{TRACK_LABEL_BY_ID[warehouseActiveOrder.trackType]}</strong>
+                    <strong>{getOrderLabel(warehouseActiveOrder)}</strong>
                     <span>{warehouseActiveOrder.turnsRemaining} turn(s) remaining</span>
                   </div>
                 </div>
@@ -716,7 +866,7 @@ export function MacroPanel({
                   {warehouseQueuedOrders.map((order, queueIndex) => (
                     <li className="queue-item" key={order.id}>
                       <div>
-                        <strong>{TRACK_LABEL_BY_ID[order.trackType]}</strong>
+                        <strong>{getOrderLabel(order)}</strong>
                         <span>{order.turnsRemaining} turn(s)</span>
                       </div>
                       <button

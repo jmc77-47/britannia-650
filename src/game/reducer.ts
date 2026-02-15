@@ -15,6 +15,15 @@ import {
   type UpgradeTrackType,
 } from './buildings'
 import {
+  CLAIM_COUNTY_COST,
+  CLAIM_COUNTY_POPULATION_COST,
+  CONQUER_COUNTY_COST,
+  CONQUER_COUNTY_POPULATION_COST,
+  NEUTRAL_OWNER_ID,
+  getClaimCountyTurns,
+  getConquerCountyTurns,
+} from './countyActions'
+import {
   getCountyBuildSlotsCapForBuildingLevels,
   getCountyBuildSlotsUsedForBuildingLevels,
   getCountyPopulationUsedForBuildingLevels,
@@ -52,9 +61,22 @@ export type GameAction =
       type: 'TOGGLE_SUPERHIGHWAYS'
     }
   | {
+      type: 'TOGGLE_NO_CONQUEST'
+    }
+  | {
       type: 'QUEUE_TRACK_UPGRADE'
       countyId: string
       trackType: UpgradeTrackType
+    }
+  | {
+      type: 'QUEUE_CLAIM_COUNTY'
+      targetCountyId: string
+      sourceCountyId: string
+    }
+  | {
+      type: 'QUEUE_CONQUER_COUNTY'
+      targetCountyId: string
+      sourceCountyId: string
     }
   | {
       type: 'QUEUE_WAREHOUSE_UPGRADE'
@@ -111,12 +133,16 @@ const getQueuedTrackIncrements = (
 ): number => {
   let pendingIncrements = 0
 
-  if (queueState.activeOrder && queueState.activeOrder.trackType === trackType) {
+  if (
+    queueState.activeOrder &&
+    queueState.activeOrder.kind === 'UPGRADE_TRACK' &&
+    queueState.activeOrder.trackType === trackType
+  ) {
     pendingIncrements += queueState.activeOrder.targetLevelDelta
   }
 
   queueState.queuedOrders.forEach((order) => {
-    if (order.trackType === trackType) {
+    if (order.kind === 'UPGRADE_TRACK' && order.trackType === trackType) {
       pendingIncrements += order.targetLevelDelta
     }
   })
@@ -133,7 +159,7 @@ const getQueuedBuildingLevelIncrements = (
   )
 
   allOrders.forEach((order) => {
-    if (!isBuildingTrack(order.trackType)) {
+    if (order.kind !== 'UPGRADE_TRACK' || !isBuildingTrack(order.trackType)) {
       return
     }
 
@@ -178,21 +204,24 @@ const getUsedOrderIds = (queueState: CountyBuildQueueState): Set<string> => {
 
 const createBuildOrderId = (
   queueOwnerId: string,
-  trackType: UpgradeTrackType,
+  orderType: string,
   turnNumber: number,
   queueState: CountyBuildQueueState,
 ): string => {
   const usedIds = getUsedOrderIds(queueState)
   let sequence = usedIds.size + 1
-  let candidate = `${queueOwnerId}-${trackType}-${turnNumber}-${sequence}`
+  let candidate = `${queueOwnerId}-${orderType}-${turnNumber}-${sequence}`
 
   while (usedIds.has(candidate)) {
     sequence += 1
-    candidate = `${queueOwnerId}-${trackType}-${turnNumber}-${sequence}`
+    candidate = `${queueOwnerId}-${orderType}-${turnNumber}-${sequence}`
   }
 
   return candidate
 }
+
+const hasAnyCountyOrder = (queueState: CountyBuildQueueState): boolean =>
+  !!queueState.activeOrder || queueState.queuedOrders.length > 0
 
 const getOwnedCountyPopulationTotal = (
   countyIds: string[],
@@ -222,6 +251,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       lastTurnReport: null,
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
+      noConquestEnabled: state.noConquestEnabled,
       discoveredCountyIds: [],
       pendingOrders: [],
     }
@@ -249,13 +279,14 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     const countiesWithOwnedRoadMinimum = { ...state.counties }
     ownedCountyIds.forEach((countyId) => {
       const countyState = state.counties[countyId]
-      if (!countyState || countyState.roadLevel >= 1) {
+      if (!countyState) {
         return
       }
 
       countiesWithOwnedRoadMinimum[countyId] = {
         ...countyState,
-        roadLevel: 1,
+        ownerId: playerFactionId,
+        roadLevel: countyState.roadLevel >= 1 ? countyState.roadLevel : 1,
       }
     })
 
@@ -296,6 +327,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       lastTurnReport: null,
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
+      noConquestEnabled: state.noConquestEnabled,
       discoveredCountyIds,
       pendingOrders: [],
     }
@@ -312,6 +344,13 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     return {
       ...state,
       superhighwaysEnabled: !state.superhighwaysEnabled,
+    }
+  }
+
+  if (action.type === 'TOGGLE_NO_CONQUEST') {
+    return {
+      ...state,
+      noConquestEnabled: !state.noConquestEnabled,
     }
   }
 
@@ -422,7 +461,13 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     }
 
     const newOrder: CountyBuildOrder = {
-      id: createBuildOrderId(countyId, action.trackType, state.turnNumber, existingQueueState),
+      id: createBuildOrderId(
+        countyId,
+        action.trackType,
+        state.turnNumber,
+        existingQueueState,
+      ),
+      kind: 'UPGRADE_TRACK',
       trackType: action.trackType,
       targetLevelDelta: 1,
       turnsRemaining: turnsRequired,
@@ -449,6 +494,184 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       buildQueueByCountyId: {
         ...state.buildQueueByCountyId,
         [countyId]: nextQueueState,
+      },
+    }
+  }
+
+  if (action.type === 'QUEUE_CLAIM_COUNTY') {
+    if (state.gamePhase !== 'playing') {
+      return state
+    }
+
+    const playerFactionId = state.playerFactionId
+    if (!playerFactionId) {
+      return state
+    }
+
+    const playerResources = state.resourcesByKingdomId[playerFactionId]
+    if (!playerResources) {
+      return state
+    }
+
+    const targetCountyId = normalizeCountyId(action.targetCountyId)
+    const sourceCountyId = normalizeCountyId(action.sourceCountyId)
+    const targetCountyState = state.counties[targetCountyId]
+    const sourceCountyState = state.counties[sourceCountyId]
+    if (!targetCountyState || !sourceCountyState) {
+      return state
+    }
+
+    if (targetCountyState.ownerId !== NEUTRAL_OWNER_ID) {
+      return state
+    }
+
+    if (sourceCountyState.ownerId !== playerFactionId) {
+      return state
+    }
+
+    const existingQueueState =
+      state.buildQueueByCountyId[targetCountyId] ?? createEmptyCountyBuildQueue()
+    if (hasAnyCountyOrder(existingQueueState)) {
+      return state
+    }
+
+    if (!hasEnoughResources(playerResources, CLAIM_COUNTY_COST)) {
+      return state
+    }
+
+    if (sourceCountyState.population < CLAIM_COUNTY_POPULATION_COST) {
+      return state
+    }
+
+    const order: CountyBuildOrder = {
+      id: createBuildOrderId(targetCountyId, 'CLAIM', state.turnNumber, existingQueueState),
+      kind: 'CLAIM_COUNTY',
+      turnsRemaining: getClaimCountyTurns(sourceCountyState.roadLevel),
+      cost: CLAIM_COUNTY_COST,
+      sourceCountyId,
+      populationCost: CLAIM_COUNTY_POPULATION_COST,
+      queuedOnTurn: state.turnNumber,
+    }
+
+    return {
+      ...state,
+      counties: {
+        ...state.counties,
+        [sourceCountyId]: {
+          ...sourceCountyState,
+          population: Math.max(
+            0,
+            sourceCountyState.population - CLAIM_COUNTY_POPULATION_COST,
+          ),
+        },
+      },
+      resourcesByKingdomId: {
+        ...state.resourcesByKingdomId,
+        [playerFactionId]: subtractResourceDelta(playerResources, CLAIM_COUNTY_COST),
+      },
+      buildQueueByCountyId: {
+        ...state.buildQueueByCountyId,
+        [targetCountyId]: {
+          ...existingQueueState,
+          activeOrder: order,
+        },
+      },
+    }
+  }
+
+  if (action.type === 'QUEUE_CONQUER_COUNTY') {
+    if (state.gamePhase !== 'playing') {
+      return state
+    }
+
+    if (state.noConquestEnabled) {
+      return state
+    }
+
+    const playerFactionId = state.playerFactionId
+    if (!playerFactionId) {
+      return state
+    }
+
+    const playerResources = state.resourcesByKingdomId[playerFactionId]
+    if (!playerResources) {
+      return state
+    }
+
+    const targetCountyId = normalizeCountyId(action.targetCountyId)
+    const sourceCountyId = normalizeCountyId(action.sourceCountyId)
+    const targetCountyState = state.counties[targetCountyId]
+    const sourceCountyState = state.counties[sourceCountyId]
+    if (!targetCountyState || !sourceCountyState) {
+      return state
+    }
+
+    if (
+      targetCountyState.ownerId === playerFactionId ||
+      targetCountyState.ownerId === NEUTRAL_OWNER_ID
+    ) {
+      return state
+    }
+
+    if (sourceCountyState.ownerId !== playerFactionId) {
+      return state
+    }
+
+    const existingQueueState =
+      state.buildQueueByCountyId[targetCountyId] ?? createEmptyCountyBuildQueue()
+    if (hasAnyCountyOrder(existingQueueState)) {
+      return state
+    }
+
+    if (!hasEnoughResources(playerResources, CONQUER_COUNTY_COST)) {
+      return state
+    }
+
+    if (sourceCountyState.population < CONQUER_COUNTY_POPULATION_COST) {
+      return state
+    }
+
+    const turnsRequired = getConquerCountyTurns(
+      targetCountyState.buildings.PALISADE ?? 0,
+      sourceCountyState.roadLevel,
+    )
+    const order: CountyBuildOrder = {
+      id: createBuildOrderId(
+        targetCountyId,
+        'CONQUER',
+        state.turnNumber,
+        existingQueueState,
+      ),
+      kind: 'CONQUER_COUNTY',
+      turnsRemaining: turnsRequired,
+      cost: CONQUER_COUNTY_COST,
+      sourceCountyId,
+      populationCost: CONQUER_COUNTY_POPULATION_COST,
+      queuedOnTurn: state.turnNumber,
+    }
+
+    return {
+      ...state,
+      counties: {
+        ...state.counties,
+        [sourceCountyId]: {
+          ...sourceCountyState,
+          population: Math.max(
+            0,
+            sourceCountyState.population - CONQUER_COUNTY_POPULATION_COST,
+          ),
+        },
+      },
+      resourcesByKingdomId: {
+        ...state.resourcesByKingdomId,
+        [playerFactionId]: subtractResourceDelta(playerResources, CONQUER_COUNTY_COST),
+      },
+      buildQueueByCountyId: {
+        ...state.buildQueueByCountyId,
+        [targetCountyId]: {
+          ...existingQueueState,
+          activeOrder: order,
+        },
       },
     }
   }
@@ -492,6 +715,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
 
     const newOrder: CountyBuildOrder = {
       id: createBuildOrderId('GLOBAL', 'WAREHOUSE', state.turnNumber, existingQueueState),
+      kind: 'UPGRADE_TRACK',
       trackType: 'WAREHOUSE',
       targetLevelDelta: 1,
       turnsRemaining: turnsRequired,
@@ -560,8 +784,24 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextBuildQueueByCountyId[countyId] = nextQueueState
     }
 
+    let nextCounties = state.counties
+    if (removedOrder.populationCost && removedOrder.sourceCountyId) {
+      const sourceCountyId = normalizeCountyId(removedOrder.sourceCountyId)
+      const sourceCounty = state.counties[sourceCountyId]
+      if (sourceCounty) {
+        nextCounties = {
+          ...state.counties,
+          [sourceCountyId]: {
+            ...sourceCounty,
+            population: sourceCounty.population + removedOrder.populationCost,
+          },
+        }
+      }
+    }
+
     return {
       ...state,
+      counties: nextCounties,
       resourcesByKingdomId: {
         ...state.resourcesByKingdomId,
         [playerFactionId]: addResourceDelta(playerResources, removedOrder.cost),

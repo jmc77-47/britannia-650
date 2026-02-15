@@ -1,11 +1,17 @@
 import {
   MAX_TRACK_LEVEL,
   addResourceDelta,
+  createEmptyBuildingLevels,
   createZeroResources,
   getCountyDefenseFromBuildingLevels,
   getPopulationCapForFarmLevel,
   isBuildingTrack,
 } from './buildings'
+import {
+  applyConquestDamageToBuildings,
+  getPostConquestPopulation,
+  getPostConquestRoadLevel,
+} from './countyActions'
 import {
   clampResourcesToStorageCaps,
   getPlayerTurnYieldSummary,
@@ -14,6 +20,7 @@ import {
 import { validateOrders } from './orders'
 import {
   createEmptyCountyBuildQueue,
+  normalizeCountyId,
   type CountyBuildQueueState,
   type GameState,
 } from './state'
@@ -35,6 +42,11 @@ export const resolveTurn = (state: GameState): GameState => {
   }
 
   const nextCounties: GameState['counties'] = { ...state.counties }
+  const nextOwnedCountyIds = new Set(state.ownedCountyIds.map((countyId) => normalizeCountyId(countyId)))
+  const nextDiscoveredCountyIds = new Set(
+    state.discoveredCountyIds.map((countyId) => normalizeCountyId(countyId)),
+  )
+  const countyActionCompletionLines: string[] = []
   const nextBuildQueueByCountyId: Record<string, CountyBuildQueueState> = {}
 
   Object.entries(state.buildQueueByCountyId).forEach(([countyId, queueState]) => {
@@ -59,31 +71,85 @@ export const resolveTurn = (state: GameState): GameState => {
       activeOrder.turnsRemaining = Math.max(0, activeOrder.turnsRemaining - 1)
 
       if (activeOrder.turnsRemaining === 0) {
-        if (activeOrder.trackType === 'ROADS') {
-          const nextRoadLevel = clampTrackLevel(
-            workingCountyState.roadLevel + activeOrder.targetLevelDelta,
-          )
-          workingCountyState = {
-            ...workingCountyState,
-            roadLevel: nextRoadLevel,
-          }
-        } else if (isBuildingTrack(activeOrder.trackType)) {
-          const nextBuildingLevels = {
-            ...workingCountyState.buildings,
-            [activeOrder.trackType]: clampTrackLevel(
-              (workingCountyState.buildings[activeOrder.trackType] ?? 0) +
-                activeOrder.targetLevelDelta,
-            ),
+        if (activeOrder.kind === 'UPGRADE_TRACK') {
+          if (activeOrder.trackType === 'ROADS') {
+            const nextRoadLevel = clampTrackLevel(
+              workingCountyState.roadLevel + activeOrder.targetLevelDelta,
+            )
+            workingCountyState = {
+              ...workingCountyState,
+              roadLevel: nextRoadLevel,
+            }
+          } else if (isBuildingTrack(activeOrder.trackType)) {
+            const nextBuildingLevels = {
+              ...workingCountyState.buildings,
+              [activeOrder.trackType]: clampTrackLevel(
+                (workingCountyState.buildings[activeOrder.trackType] ?? 0) +
+                  activeOrder.targetLevelDelta,
+              ),
+            }
+
+            workingCountyState = {
+              ...workingCountyState,
+              buildings: nextBuildingLevels,
+              defense: getCountyDefenseFromBuildingLevels(nextBuildingLevels),
+            }
           }
 
-          workingCountyState = {
-            ...workingCountyState,
-            buildings: nextBuildingLevels,
-            defense: getCountyDefenseFromBuildingLevels(nextBuildingLevels),
+          activeOrder = queuedOrders.shift() ?? null
+        } else if (activeOrder.kind === 'CLAIM_COUNTY') {
+          const playerFactionId = state.playerFactionId
+          if (playerFactionId) {
+            const buildingLevels = createEmptyBuildingLevels()
+            buildingLevels.FARM = 1
+            const populationCap = getPopulationCapForFarmLevel(buildingLevels.FARM)
+
+            workingCountyState = {
+              ...workingCountyState,
+              ownerId: playerFactionId,
+              buildings: buildingLevels,
+              roadLevel: 1,
+              population: Math.min(30, populationCap),
+              defense: getCountyDefenseFromBuildingLevels(buildingLevels),
+            }
+
+            nextOwnedCountyIds.add(countyId)
+            nextDiscoveredCountyIds.add(countyId)
+            countyActionCompletionLines.push(`Claimed ${workingCountyState.name} (${countyId})`)
           }
+
+          activeOrder = null
+          queuedOrders.length = 0
+        } else if (activeOrder.kind === 'CONQUER_COUNTY') {
+          const playerFactionId = state.playerFactionId
+          if (playerFactionId) {
+            const nextBuildingLevels = applyConquestDamageToBuildings(
+              workingCountyState.buildings,
+            )
+            const populationCap = getPopulationCapForFarmLevel(nextBuildingLevels.FARM)
+
+            workingCountyState = {
+              ...workingCountyState,
+              ownerId: playerFactionId,
+              buildings: nextBuildingLevels,
+              roadLevel: getPostConquestRoadLevel(workingCountyState.roadLevel),
+              population: Math.min(
+                getPostConquestPopulation(workingCountyState.population),
+                populationCap,
+              ),
+              defense: getCountyDefenseFromBuildingLevels(nextBuildingLevels),
+            }
+
+            nextOwnedCountyIds.add(countyId)
+            nextDiscoveredCountyIds.add(countyId)
+            countyActionCompletionLines.push(
+              `Conquered ${workingCountyState.name} (${countyId})`,
+            )
+          }
+
+          activeOrder = null
+          queuedOrders.length = 0
         }
-
-        activeOrder = queuedOrders.shift() ?? null
       }
     }
 
@@ -129,7 +195,8 @@ export const resolveTurn = (state: GameState): GameState => {
         }
       : createEmptyCountyBuildQueue()
 
-  state.ownedCountyIds.forEach((countyId) => {
+  const nextOwnedCountyIdList = [...nextOwnedCountyIds]
+  nextOwnedCountyIdList.forEach((countyId) => {
     const countyState = nextCounties[countyId]
     if (!countyState || countyState.roadLevel >= 1) {
       return
@@ -143,6 +210,8 @@ export const resolveTurn = (state: GameState): GameState => {
 
   const postBuildState: GameState = {
     ...state,
+    ownedCountyIds: nextOwnedCountyIdList,
+    discoveredCountyIds: [...nextDiscoveredCountyIds],
     counties: nextCounties,
     buildQueueByCountyId: nextBuildQueueByCountyId,
     globalBuildQueue: nextGlobalBuildQueue,
@@ -186,7 +255,7 @@ export const resolveTurn = (state: GameState): GameState => {
   nextPlayerResources = storageClampResult.resources
 
   const populationCapLines: string[] = []
-  state.ownedCountyIds.forEach((countyId) => {
+  nextOwnedCountyIdList.forEach((countyId) => {
     const countyState = nextCounties[countyId]
     if (!countyState) {
       return
@@ -209,7 +278,7 @@ export const resolveTurn = (state: GameState): GameState => {
     }
   })
 
-  const totalOwnedPopulation = state.ownedCountyIds.reduce((total, countyId) => {
+  const totalOwnedPopulation = nextOwnedCountyIdList.reduce((total, countyId) => {
     return total + (nextCounties[countyId]?.population ?? 0)
   }, 0)
   nextPlayerResources = {
@@ -228,6 +297,8 @@ export const resolveTurn = (state: GameState): GameState => {
     ...state,
     counties: nextCounties,
     resourcesByKingdomId: nextResourcesByKingdomId,
+    ownedCountyIds: nextOwnedCountyIdList,
+    discoveredCountyIds: [...nextDiscoveredCountyIds],
     turnNumber: nextTurnNumber,
     buildQueueByCountyId: nextBuildQueueByCountyId,
     globalBuildQueue: nextGlobalBuildQueue,
@@ -239,6 +310,7 @@ export const resolveTurn = (state: GameState): GameState => {
         nextPlayerResources,
       ),
       topContributions: [
+        ...countyActionCompletionLines,
         ...storageClampResult.wasteLines,
         ...populationCapLines,
         ...turnYieldSummary.contributionLines,

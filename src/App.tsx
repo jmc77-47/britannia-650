@@ -45,6 +45,15 @@ import {
   type UpgradeTrackType,
 } from './game/buildings'
 import {
+  CLAIM_COUNTY_COST,
+  CLAIM_COUNTY_POPULATION_COST,
+  CONQUER_COUNTY_COST,
+  CONQUER_COUNTY_POPULATION_COST,
+  NEUTRAL_OWNER_ID,
+  getClaimCountyTurns,
+  getConquerCountyTurns,
+} from './game/countyActions'
+import {
   getCountyBuildSlotsCapForBuildingLevels,
   getCountyBuildSlotsUsedForBuildingLevels,
   getCountyDerivedStats,
@@ -58,6 +67,7 @@ import {
 } from './map/CanvasRoadLayer'
 import {
   createInitialGameState,
+  type CountyBuildOrder,
   type CountyBuildQueueState,
   type GameState,
   type ResourceStockpile,
@@ -74,6 +84,7 @@ const COUNTY_BASE_FILL = '#5a6550'
 const COUNTY_HOVER_FILL = '#738260'
 const COUNTY_SELECTED_FILL = '#d8ba66'
 const PLAYER_FACTION_FALLBACK_FILL = '#79c5f0'
+const ENEMY_FACTION_FALLBACK_FILL = '#806257'
 const FOGGED_COUNTY_FILL = '#1a2328'
 const EMPTY_RESOURCE_STOCKPILE: ResourceStockpile = createZeroResources()
 const RESOURCE_RIBBON_ITEMS: { key: keyof ResourceStockpile; label: string }[] = [
@@ -332,11 +343,14 @@ const getQueuedTrackIncrements = (
   }
 
   let pendingIncrements = 0
-  if (queueState.activeOrder?.trackType === trackType) {
+  if (
+    queueState.activeOrder?.kind === 'UPGRADE_TRACK' &&
+    queueState.activeOrder.trackType === trackType
+  ) {
     pendingIncrements += queueState.activeOrder.targetLevelDelta
   }
   queueState.queuedOrders.forEach((order) => {
-    if (order.trackType === trackType) {
+    if (order.kind === 'UPGRADE_TRACK' && order.trackType === trackType) {
       pendingIncrements += order.targetLevelDelta
     }
   })
@@ -356,7 +370,7 @@ const getQueuedBuildingLevelIncrements = (
     (order): order is NonNullable<CountyBuildQueueState['activeOrder']> => !!order,
   )
   queuedOrders.forEach((order) => {
-    if (!isBuildingTrack(order.trackType)) {
+    if (order.kind !== 'UPGRADE_TRACK' || !isBuildingTrack(order.trackType)) {
       return
     }
     increments[order.trackType] = (increments[order.trackType] ?? 0) + order.targetLevelDelta
@@ -410,6 +424,9 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const [hoveredCountyId, setHoveredCountyId] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [lastSelectedOwnedCountyId, setLastSelectedOwnedCountyId] = useState<string | null>(
+    null,
+  )
   const [setupCharacterId, setSetupCharacterId] = useState<string | null>(
     initialGameState.availableCharacters[0]?.id ?? null,
   )
@@ -670,13 +687,21 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     [gameState.buildQueueByCountyId, selectedCountyForPanel],
   )
   const warehouseQueueState = gameState.globalBuildQueue
+  const playerFactionId = gameState.playerFactionId
+  const selectedCountyOwnerId = selectedCountyState?.ownerId ?? NEUTRAL_OWNER_ID
   const selectedCountyOwned = useMemo(
     () =>
       selectedCountyForPanel
-        ? ownedCountyIdSet.has(selectedCountyForPanel.id)
+        ? !!playerFactionId && selectedCountyOwnerId === playerFactionId
         : false,
-    [ownedCountyIdSet, selectedCountyForPanel],
+    [playerFactionId, selectedCountyForPanel, selectedCountyOwnerId],
   )
+  useEffect(() => {
+    if (!selectedCountyOwned || !selectedCountyForPanel) {
+      return
+    }
+    setLastSelectedOwnedCountyId(selectedCountyForPanel.id)
+  }, [selectedCountyForPanel, selectedCountyOwned])
   const selectedCountyActiveOrder = selectedCountyQueueState.activeOrder
   const selectedCountyQueuedOrders = selectedCountyQueueState.queuedOrders
   const warehouseActiveOrder = warehouseQueueState.activeOrder
@@ -719,7 +744,6 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     [gameState.availableCharacters, gameState.selectedCharacterId],
   )
   const playerResources = useMemo<ResourceStockpile>(() => {
-    const playerFactionId = gameState.playerFactionId
     if (!playerFactionId) {
       return EMPTY_RESOURCE_STOCKPILE
     }
@@ -727,7 +751,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     return (
       gameState.resourcesByKingdomId[playerFactionId] ?? EMPTY_RESOURCE_STOCKPILE
     )
-  }, [gameState.playerFactionId, gameState.resourcesByKingdomId])
+  }, [gameState.resourcesByKingdomId, playerFactionId])
   const playerPopulationTotals = useMemo(
     () => getPlayerPopulationTotals(gameState),
     [gameState],
@@ -937,6 +961,17 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const selectedCountySlotsUsed = selectedCountyDerivedStats?.buildSlotsUsed ?? 0
   const selectedCountySlotsCap = selectedCountyDerivedStats?.buildSlotsCap ?? 0
 
+  const kingdomById = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; name: string; color: string; countyIds: string[] }
+    >()
+    gameState.kingdoms.forEach((kingdom) => {
+      map.set(kingdom.id, kingdom)
+    })
+    return map
+  }, [gameState.kingdoms])
+
   const kingdomByCountyId = useMemo(() => {
     const map = new Map<
       string,
@@ -949,6 +984,21 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     })
     return map
   }, [gameState.kingdoms])
+
+  const getOwnerDisplayName = useCallback(
+    (ownerId: string | null | undefined): string => {
+      const normalizedOwnerId = ownerId?.trim() ?? ''
+      if (!normalizedOwnerId || normalizedOwnerId === NEUTRAL_OWNER_ID) {
+        return 'Unclaimed'
+      }
+      if (playerFactionId && normalizedOwnerId === playerFactionId) {
+        return gameState.playerFactionName ?? 'Player'
+      }
+
+      return kingdomById.get(normalizedOwnerId)?.name ?? 'Foreign Kingdom'
+    },
+    [gameState.playerFactionName, kingdomById, playerFactionId],
+  )
 
   const setupCharacterCards = useMemo<SetupCharacterCard[]>(
     () =>
@@ -968,6 +1018,173 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       }),
     [gameState.availableCharacters, gameState.counties, kingdomByCountyId],
   )
+
+  const getAdjacentOwnedSourceCountyId = useCallback(
+    (targetCountyId: string): string | null => {
+      const normalizedTargetCountyId = normalizeCountyId(targetCountyId)
+      const adjacentCountyIds = mapData.countyNeighborIdsByCounty[normalizedTargetCountyId] ?? []
+      const adjacentOwnedCountyIds = adjacentCountyIds.filter((adjacentCountyId) => {
+        const normalizedAdjacentCountyId = normalizeCountyId(adjacentCountyId)
+        if (!normalizedAdjacentCountyId) {
+          return false
+        }
+        return (
+          !!playerFactionId &&
+          gameState.counties[normalizedAdjacentCountyId]?.ownerId === playerFactionId
+        )
+      })
+
+      if (adjacentOwnedCountyIds.length === 0) {
+        return null
+      }
+
+      if (lastSelectedOwnedCountyId) {
+        const normalizedLastOwnedCountyId = normalizeCountyId(lastSelectedOwnedCountyId)
+        if (adjacentOwnedCountyIds.includes(normalizedLastOwnedCountyId)) {
+          return normalizedLastOwnedCountyId
+        }
+      }
+
+      return normalizeCountyId(adjacentOwnedCountyIds[0])
+    },
+    [gameState.counties, lastSelectedOwnedCountyId, mapData.countyNeighborIdsByCounty, playerFactionId],
+  )
+
+  const selectedCountyOwnershipKind = useMemo<
+    'none' | 'owned' | 'neutral' | 'enemy'
+  >(() => {
+    if (!selectedCountyForPanel || !playerFactionId) {
+      return 'none'
+    }
+
+    const ownerId = gameState.counties[selectedCountyForPanel.id]?.ownerId ?? NEUTRAL_OWNER_ID
+    if (ownerId === playerFactionId) {
+      return 'owned'
+    }
+    if (ownerId === NEUTRAL_OWNER_ID) {
+      return 'neutral'
+    }
+    return 'enemy'
+  }, [gameState.counties, playerFactionId, selectedCountyForPanel])
+
+  const selectedCountyOwnerLabel = useMemo(() => {
+    if (!selectedCountyForPanel) {
+      return 'None selected'
+    }
+    return getOwnerDisplayName(gameState.counties[selectedCountyForPanel.id]?.ownerId)
+  }, [gameState.counties, getOwnerDisplayName, selectedCountyForPanel])
+
+  const selectedCountySourceId = useMemo(
+    () =>
+      selectedCountyForPanel
+        ? getAdjacentOwnedSourceCountyId(selectedCountyForPanel.id)
+        : null,
+    [getAdjacentOwnedSourceCountyId, selectedCountyForPanel],
+  )
+  const selectedCountySourceState = useMemo(
+    () =>
+      selectedCountySourceId ? gameState.counties[selectedCountySourceId] ?? null : null,
+    [gameState.counties, selectedCountySourceId],
+  )
+  const selectedCountyInteractionOrder = useMemo<CountyBuildOrder | null>(() => {
+    const activeOrder = selectedCountyQueueState.activeOrder
+    if (!activeOrder) {
+      return null
+    }
+    if (activeOrder.kind === 'CLAIM_COUNTY' || activeOrder.kind === 'CONQUER_COUNTY') {
+      return activeOrder
+    }
+    return null
+  }, [selectedCountyQueueState.activeOrder])
+  const selectedCountyHasQueuedOrders = selectedCountyQueueState.queuedOrders.length > 0
+
+  const selectedCountyActionPanel = useMemo(() => {
+    if (!selectedCountyForPanel || !selectedCountyState || !playerFactionId) {
+      return null
+    }
+
+    const sourceCountyName = selectedCountySourceState?.name ?? null
+    const sourceCountyPopulation = selectedCountySourceState?.population ?? null
+    const hasBlockingOrder = !!selectedCountyInteractionOrder || selectedCountyHasQueuedOrders
+
+    if (selectedCountyOwnershipKind === 'neutral') {
+      const turnsRequired = getClaimCountyTurns(selectedCountySourceState?.roadLevel ?? 0)
+      let disabledReason: string | undefined
+
+      if (!selectedCountySourceState || !selectedCountySourceId) {
+        disabledReason = 'Not adjacent to a player-owned county.'
+      } else if (hasBlockingOrder) {
+        disabledReason = 'Action already in progress.'
+      } else if (!hasEnoughResources(playerResources, CLAIM_COUNTY_COST)) {
+        disabledReason = 'Not enough resources.'
+      } else if (selectedCountySourceState.population < CLAIM_COUNTY_POPULATION_COST) {
+        disabledReason = 'Not enough population in source county.'
+      }
+
+      return {
+        mode: 'claim' as const,
+        isAdjacent: !!selectedCountySourceState,
+        turnsRequired,
+        costLabel: formatCostLabel(CLAIM_COUNTY_COST),
+        populationCost: CLAIM_COUNTY_POPULATION_COST,
+        populationCostLabel: 'Settlers',
+        sourceCountyId: selectedCountySourceId,
+        sourceCountyName,
+        sourceCountyPopulation,
+        activeOrder: selectedCountyInteractionOrder,
+        canStart: !disabledReason,
+        disabledReason,
+      }
+    }
+
+    if (selectedCountyOwnershipKind === 'enemy') {
+      const turnsRequired = getConquerCountyTurns(
+        selectedCountyState.buildings.PALISADE ?? 0,
+        selectedCountySourceState?.roadLevel ?? 0,
+      )
+      let disabledReason: string | undefined
+
+      if (!selectedCountySourceState || !selectedCountySourceId) {
+        disabledReason = 'Not adjacent to a player-owned county.'
+      } else if (gameState.noConquestEnabled) {
+        disabledReason = 'Conquest disabled (Settings).'
+      } else if (hasBlockingOrder) {
+        disabledReason = 'Action already in progress.'
+      } else if (!hasEnoughResources(playerResources, CONQUER_COUNTY_COST)) {
+        disabledReason = 'Not enough resources.'
+      } else if (selectedCountySourceState.population < CONQUER_COUNTY_POPULATION_COST) {
+        disabledReason = 'Not enough population in source county.'
+      }
+
+      return {
+        mode: 'conquer' as const,
+        isAdjacent: !!selectedCountySourceState,
+        turnsRequired,
+        costLabel: formatCostLabel(CONQUER_COUNTY_COST),
+        populationCost: CONQUER_COUNTY_POPULATION_COST,
+        populationCostLabel: 'Troops',
+        sourceCountyId: selectedCountySourceId,
+        sourceCountyName,
+        sourceCountyPopulation,
+        activeOrder: selectedCountyInteractionOrder,
+        canStart: !disabledReason,
+        disabledReason,
+      }
+    }
+
+    return null
+  }, [
+    gameState.noConquestEnabled,
+    playerFactionId,
+    playerResources,
+    selectedCountyForPanel,
+    selectedCountyHasQueuedOrders,
+    selectedCountyInteractionOrder,
+    selectedCountyOwnershipKind,
+    selectedCountySourceId,
+    selectedCountySourceState,
+    selectedCountyState,
+  ])
 
   const tooltipCounty = useMemo(
     () =>
@@ -1013,11 +1230,14 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       if (county.id === gameState.selectedCountyId) {
         return COUNTY_SELECTED_FILL
       }
-      if (
-        gameState.gamePhase === 'playing' &&
-        ownedCountyIdSet.has(county.id)
-      ) {
-        return gameState.playerFactionColor ?? PLAYER_FACTION_FALLBACK_FILL
+      if (gameState.gamePhase === 'playing') {
+        const ownerId = gameState.counties[county.id]?.ownerId ?? NEUTRAL_OWNER_ID
+        if (ownerId === playerFactionId) {
+          return gameState.playerFactionColor ?? PLAYER_FACTION_FALLBACK_FILL
+        }
+        if (ownerId !== NEUTRAL_OWNER_ID) {
+          return kingdomById.get(ownerId)?.color ?? ENEMY_FACTION_FALLBACK_FILL
+        }
       }
       if (county.id === hoveredCountyId) {
         return COUNTY_HOVER_FILL
@@ -1025,12 +1245,14 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       return COUNTY_BASE_FILL
     },
     [
+      gameState.counties,
       gameState.gamePhase,
       gameState.playerFactionColor,
       gameState.selectedCountyId,
       hoveredCountyId,
       isCountyVisible,
-      ownedCountyIdSet,
+      kingdomById,
+      playerFactionId,
     ],
   )
 
@@ -1218,6 +1440,91 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     [isCountyVisible, isSetupPhase, settingsOpen],
   )
 
+  const countyAffordanceSets = useMemo(() => {
+    const claimableCountyIds = new Set<string>()
+    const conquerableCountyIds = new Set<string>()
+    const sourceCountyIds = new Set<string>()
+
+    if (!selectedCountyForPanel || !playerFactionId) {
+      return {
+        claimableCountyIds,
+        conquerableCountyIds,
+        sourceCountyIds,
+      }
+    }
+
+    const selectedCountyId = selectedCountyForPanel.id
+    const adjacentCountyIds = mapData.countyNeighborIdsByCounty[selectedCountyId] ?? []
+
+    if (selectedCountyOwnershipKind === 'owned') {
+      const sourcePopulation = selectedCountyState?.population ?? 0
+      adjacentCountyIds.forEach((adjacentCountyId) => {
+        const normalizedAdjacentCountyId = normalizeCountyId(adjacentCountyId)
+        if (!normalizedAdjacentCountyId || !isCountyVisible(normalizedAdjacentCountyId)) {
+          return
+        }
+
+        const adjacentCounty = gameState.counties[normalizedAdjacentCountyId]
+        if (!adjacentCounty) {
+          return
+        }
+
+        const adjacentQueueState = gameState.buildQueueByCountyId[normalizedAdjacentCountyId]
+        const hasBlockingOrder =
+          !!adjacentQueueState?.activeOrder || (adjacentQueueState?.queuedOrders.length ?? 0) > 0
+
+        if (adjacentCounty.ownerId === NEUTRAL_OWNER_ID) {
+          if (
+            !hasBlockingOrder &&
+            hasEnoughResources(playerResources, CLAIM_COUNTY_COST) &&
+            sourcePopulation >= CLAIM_COUNTY_POPULATION_COST
+          ) {
+            claimableCountyIds.add(normalizedAdjacentCountyId)
+          }
+          return
+        }
+
+        if (
+          adjacentCounty.ownerId !== playerFactionId &&
+          !gameState.noConquestEnabled &&
+          !hasBlockingOrder &&
+          hasEnoughResources(playerResources, CONQUER_COUNTY_COST) &&
+          sourcePopulation >= CONQUER_COUNTY_POPULATION_COST
+        ) {
+          conquerableCountyIds.add(normalizedAdjacentCountyId)
+        }
+      })
+    } else if (selectedCountyOwnershipKind === 'neutral' || selectedCountyOwnershipKind === 'enemy') {
+      adjacentCountyIds.forEach((adjacentCountyId) => {
+        const normalizedAdjacentCountyId = normalizeCountyId(adjacentCountyId)
+        if (!normalizedAdjacentCountyId || !isCountyVisible(normalizedAdjacentCountyId)) {
+          return
+        }
+
+        if (gameState.counties[normalizedAdjacentCountyId]?.ownerId === playerFactionId) {
+          sourceCountyIds.add(normalizedAdjacentCountyId)
+        }
+      })
+    }
+
+    return {
+      claimableCountyIds,
+      conquerableCountyIds,
+      sourceCountyIds,
+    }
+  }, [
+    gameState.buildQueueByCountyId,
+    gameState.counties,
+    isCountyVisible,
+    mapData.countyNeighborIdsByCounty,
+    playerFactionId,
+    playerResources,
+    selectedCountyForPanel,
+    selectedCountyOwnershipKind,
+    selectedCountyState?.population,
+    gameState.noConquestEnabled,
+  ])
+
   const countyRoadEdges = useMemo<CountyRoadEdge[]>(() => {
     const edges: CountyRoadEdge[] = []
 
@@ -1344,6 +1651,31 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     setSetupCharacterId(gameState.availableCharacters[0]?.id ?? null)
     dispatch({ type: 'OPEN_SETUP' })
   }, [gameState.availableCharacters])
+
+  const queueClaimForSelectedCounty = useCallback(() => {
+    if (!selectedCountyForPanel || !selectedCountySourceId) {
+      return
+    }
+
+    dispatch({
+      type: 'QUEUE_CLAIM_COUNTY',
+      targetCountyId: selectedCountyForPanel.id,
+      sourceCountyId: selectedCountySourceId,
+    })
+  }, [selectedCountyForPanel, selectedCountySourceId])
+
+  const queueConquerForSelectedCounty = useCallback(() => {
+    if (!selectedCountyForPanel || !selectedCountySourceId) {
+      return
+    }
+
+    dispatch({
+      type: 'QUEUE_CONQUER_COUNTY',
+      targetCountyId: selectedCountyForPanel.id,
+      sourceCountyId: selectedCountySourceId,
+    })
+  }, [selectedCountyForPanel, selectedCountySourceId])
+
   const queueTrackUpgradeForSelectedCounty = useCallback(
     (trackType: UpgradeTrackType) => {
       if (!selectedCountyForPanel) {
@@ -1523,11 +1855,21 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
               {projectedMap.counties.map((county) => {
                 const isPlayerCounty = ownedCountyIdSet.has(county.id)
                 const countyVisible = isCountyVisible(county.id)
+                const isClaimAffordance =
+                  countyAffordanceSets.claimableCountyIds.has(county.id)
+                const isConquerAffordance =
+                  countyAffordanceSets.conquerableCountyIds.has(county.id)
+                const isSourceAffordance =
+                  countyAffordanceSets.sourceCountyIds.has(county.id)
                 return (
                   <path
                     className={`county-fill${hoveredCountyId === county.id ? ' is-hovered' : ''}${
                       gameState.selectedCountyId === county.id ? ' is-selected' : ''
-                    }${isPlayerCounty ? ' is-player-owned' : ''}`}
+                    }${isPlayerCounty ? ' is-player-owned' : ''}${
+                      isClaimAffordance ? ' is-afford-claim' : ''
+                    }${isConquerAffordance ? ' is-afford-conquer' : ''}${
+                      isSourceAffordance ? ' is-afford-source' : ''
+                    }`}
                     d={county.d}
                     fill={getCountyFill(county)}
                     key={county.id}
@@ -1544,6 +1886,38 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
                 )
               })}
             </g>
+
+            {gameState.gamePhase === 'playing' && (
+              <g className="county-affordance-layer" pointerEvents="none">
+                {projectedMap.counties
+                  .filter((county) => countyAffordanceSets.claimableCountyIds.has(county.id))
+                  .map((county) => (
+                    <path
+                      className="county-affordance-outline is-claim"
+                      d={county.d}
+                      key={`claim-affordance-${county.id}`}
+                    />
+                  ))}
+                {projectedMap.counties
+                  .filter((county) => countyAffordanceSets.conquerableCountyIds.has(county.id))
+                  .map((county) => (
+                    <path
+                      className="county-affordance-outline is-conquer"
+                      d={county.d}
+                      key={`conquer-affordance-${county.id}`}
+                    />
+                  ))}
+                {projectedMap.counties
+                  .filter((county) => countyAffordanceSets.sourceCountyIds.has(county.id))
+                  .map((county) => (
+                    <path
+                      className="county-affordance-outline is-source"
+                      d={county.d}
+                      key={`source-affordance-${county.id}`}
+                    />
+                  ))}
+              </g>
+            )}
 
             {gameState.gamePhase === 'playing' && (
               <g className="player-county-layer">
@@ -1721,6 +2095,8 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         <MacroPanel
           onEndTurn={handleEndTurn}
           onQueueTrackUpgrade={queueTrackUpgradeForSelectedCounty}
+          onQueueClaimCounty={queueClaimForSelectedCounty}
+          onQueueConquerCounty={queueConquerForSelectedCounty}
           onQueueWarehouseUpgrade={queueWarehouseUpgrade}
           onRemoveQueuedBuildOrder={removeQueuedOrderForSelectedCounty}
           onRemoveQueuedWarehouseOrder={removeQueuedWarehouseOrder}
@@ -1750,6 +2126,9 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           selectedCountyYields={selectedCountyYields}
           storageRiskEntries={storageRiskEntries}
           selectedCountyOwned={selectedCountyOwned}
+          selectedCountyOwnershipKind={selectedCountyOwnershipKind}
+          selectedCountyOwnerLabel={selectedCountyOwnerLabel}
+          selectedCountyActionPanel={selectedCountyActionPanel}
           selectedCounty={selectedCountyForPanel}
           turnNumber={gameState.turnNumber}
         />
@@ -1821,6 +2200,27 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
                     <span className="toggle-thumb" />
                   </button>
                   <strong>{gameState.superhighwaysEnabled ? 'On' : 'Off'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-toggle-row">
+                <div className="settings-toggle-copy">
+                  <p className="settings-toggle-label">No Conquest</p>
+                  <p className="settings-toggle-desc">
+                    Disable conquest actions for a friendlier exploration loop.
+                  </p>
+                </div>
+                <div className="settings-toggle-controls">
+                  <button
+                    aria-label={`No Conquest ${gameState.noConquestEnabled ? 'On' : 'Off'}`}
+                    aria-pressed={gameState.noConquestEnabled}
+                    className={`toggle-switch${gameState.noConquestEnabled ? ' is-on' : ''}`}
+                    onClick={() => dispatch({ type: 'TOGGLE_NO_CONQUEST' })}
+                    type="button"
+                  >
+                    <span className="toggle-thumb" />
+                  </button>
+                  <strong>{gameState.noConquestEnabled ? 'On' : 'Off'}</strong>
                 </div>
               </div>
             </section>

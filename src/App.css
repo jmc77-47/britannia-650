@@ -122,6 +122,47 @@
   filter: saturate(1.2) brightness(1.08);
 }
 
+.county-fill.is-afford-claim {
+  filter: brightness(1.08) saturate(1.08);
+}
+
+.county-fill.is-afford-conquer {
+  filter: brightness(1.02) saturate(1.15);
+}
+
+.county-fill.is-afford-source {
+  filter: brightness(1.06);
+}
+
+.county-affordance-layer {
+  pointer-events: none;
+}
+
+.county-affordance-outline {
+  fill: none;
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.county-affordance-outline.is-claim {
+  stroke: rgba(162, 229, 178, 0.88);
+  filter: drop-shadow(0 0 7px rgba(124, 219, 152, 0.48));
+}
+
+.county-affordance-outline.is-conquer {
+  stroke: rgba(244, 152, 128, 0.88);
+  filter: drop-shadow(0 0 7px rgba(238, 126, 101, 0.52));
+}
+
+.county-affordance-outline.is-source {
+  stroke: rgba(167, 209, 239, 0.86);
+  stroke-dasharray: 6 4;
+  filter: drop-shadow(0 0 6px rgba(121, 184, 228, 0.44));
+}
+
 .player-county-glow {
   fill: none;
   stroke: rgba(248, 222, 144, 0.52);
@@ -1319,6 +1360,12 @@ button:disabled {
   background: rgba(169, 127, 63, 0.2);
 }
 
+.ownership-pill.is-neutral {
+  color: #d8e8d5;
+  border-color: rgba(174, 216, 165, 0.44);
+  background: rgba(78, 124, 81, 0.22);
+}
+
 .ownership-pill.is-foreign {
   color: #d5d0c0;
   border-color: rgba(210, 205, 193, 0.26);
@@ -1751,6 +1798,19 @@ button:disabled {
   min-width: 4.6rem;
   padding: 0.32rem 0.5rem;
   font-size: 0.76rem;
+}
+
+.county-action-panel {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.county-action-chips {
+  justify-content: flex-start;
+}
+
+.county-action-button {
+  margin-top: 0.1rem;
 }
 
 .legend {

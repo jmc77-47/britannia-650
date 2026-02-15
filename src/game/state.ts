@@ -1,5 +1,9 @@
 import type { MacroOrder } from './orders'
 import {
+  NEUTRAL_OWNER_ID,
+  type CountyActionOrderKind,
+} from './countyActions'
+import {
   createEmptyBuildingLevels,
   getCountyDefenseFromBuildingLevels,
   getPopulationCapForFarmLevel,
@@ -15,6 +19,7 @@ export type GamePhase = 'setup' | 'playing'
 export interface CountyGameState {
   id: string
   name: string
+  ownerId: string
   buildings: BuildingLevels
   defense: number
   prosperity: number
@@ -22,14 +27,35 @@ export interface CountyGameState {
   population: number
 }
 
-export interface CountyBuildOrder {
+interface BaseCountyActionOrder {
   id: string
-  trackType: UpgradeTrackType
-  targetLevelDelta: 1
+  kind: CountyActionOrderKind
   turnsRemaining: number
   cost: ResourceDelta
+  sourceCountyId?: string
+  populationCost?: number
   queuedOnTurn: number
 }
+
+export interface CountyUpgradeOrder extends BaseCountyActionOrder {
+  kind: 'UPGRADE_TRACK'
+  trackType: UpgradeTrackType
+  targetLevelDelta: 1
+}
+
+export interface CountyClaimOrder extends BaseCountyActionOrder {
+  kind: 'CLAIM_COUNTY'
+  sourceCountyId: string
+  populationCost: number
+}
+
+export interface CountyConquerOrder extends BaseCountyActionOrder {
+  kind: 'CONQUER_COUNTY'
+  sourceCountyId: string
+  populationCost: number
+}
+
+export type CountyBuildOrder = CountyUpgradeOrder | CountyClaimOrder | CountyConquerOrder
 
 export interface CountyBuildQueueState {
   activeOrder: CountyBuildOrder | null
@@ -83,6 +109,7 @@ export interface GameState {
   lastTurnReport: TurnReport | null
   fogOfWarEnabled: boolean
   superhighwaysEnabled: boolean
+  noConquestEnabled: boolean
   discoveredCountyIds: string[]
   availableCharacters: StartCharacter[]
   kingdoms: KingdomGameState[]
@@ -132,6 +159,7 @@ interface KingdomRecord {
 
 interface KingdomsPayload {
   kingdoms?: unknown
+  unclaimedCountyIds?: unknown
 }
 
 export const normalizeCountyId = (countyId: string | null | undefined): string =>
@@ -215,6 +243,7 @@ const parseCountyState = (payload: unknown): Record<string, CountyGameState> => 
       counties[countyId] = {
         id: countyId,
         name: countyName,
+        ownerId: NEUTRAL_OWNER_ID,
         buildings: buildingLevels,
         defense: Math.max(derivedDefense, defenseFromPayload),
         prosperity,
@@ -306,6 +335,22 @@ const parseKingdoms = (payload: unknown): KingdomGameState[] => {
   return kingdoms
 }
 
+const parseUnclaimedCountyIds = (payload: unknown): string[] => {
+  if (!payload || typeof payload !== 'object') {
+    return []
+  }
+
+  const rawCountyIds = (payload as KingdomsPayload).unclaimedCountyIds
+  if (!Array.isArray(rawCountyIds)) {
+    return []
+  }
+
+  return rawCountyIds
+    .filter((countyId): countyId is string => typeof countyId === 'string')
+    .map((countyId) => normalizeCountyId(countyId))
+    .filter((countyId) => countyId.length > 0)
+}
+
 export const createInitialGameState = async (): Promise<GameState> => {
   const toAssetUrl = assetUrl(import.meta.env.BASE_URL)
   const [countyMetadata, startsPayload, kingdomsPayload] = await Promise.all([
@@ -314,6 +359,31 @@ export const createInitialGameState = async (): Promise<GameState> => {
     fetchJson<unknown>(toAssetUrl(KINGDOMS_PATH)),
   ])
   const kingdoms = parseKingdoms(kingdomsPayload)
+  const unclaimedCountyIds = parseUnclaimedCountyIds(kingdomsPayload)
+  const counties = parseCountyState(countyMetadata)
+  kingdoms.forEach((kingdom) => {
+    kingdom.countyIds.forEach((countyId) => {
+      const countyState = counties[countyId]
+      if (!countyState) {
+        return
+      }
+      counties[countyId] = {
+        ...countyState,
+        ownerId: kingdom.id,
+      }
+    })
+  })
+  unclaimedCountyIds.forEach((countyId) => {
+    const countyState = counties[countyId]
+    if (!countyState) {
+      return
+    }
+    counties[countyId] = {
+      ...countyState,
+      ownerId: NEUTRAL_OWNER_ID,
+    }
+  })
+
   const resourcesByKingdomId: Record<string, ResourceStockpile> = {}
   kingdoms.forEach((kingdom) => {
     resourcesByKingdomId[kingdom.id] = createStartingResources()
@@ -336,10 +406,11 @@ export const createInitialGameState = async (): Promise<GameState> => {
     lastTurnReport: null,
     fogOfWarEnabled: true,
     superhighwaysEnabled: false,
+    noConquestEnabled: false,
     discoveredCountyIds: [],
     availableCharacters: parseStartCharacters(startsPayload),
     kingdoms,
-    counties: parseCountyState(countyMetadata),
+    counties,
     pendingOrders: [],
   }
 }
