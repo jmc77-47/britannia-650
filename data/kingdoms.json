@@ -1,0 +1,179 @@
+{
+  "kingdoms": [
+    {
+      "id": "kingdom_glm",
+      "name": "Kingdom of the Severn Sea",
+      "tier": "port_major",
+      "capitalCountyId": "GLM",
+      "countyIds": [
+        "GLM",
+        "MNM",
+        "BRN"
+      ],
+      "deepwaterPortCountyId": "GLM"
+    },
+    {
+      "id": "kingdom_mlt",
+      "name": "Kingdom of the Lothians",
+      "tier": "port_major",
+      "capitalCountyId": "MLT",
+      "countyIds": [
+        "MLT",
+        "ELT",
+        "BRW"
+      ],
+      "deepwaterPortCountyId": "MLT"
+    },
+    {
+      "id": "kingdom_lnk",
+      "name": "Kingdom of Strathclyde",
+      "tier": "port_major",
+      "capitalCountyId": "LNK",
+      "countyIds": [
+        "LNK",
+        "AYS",
+        "WGT"
+      ],
+      "deepwaterPortCountyId": "LNK"
+    },
+    {
+      "id": "kingdom_msx",
+      "name": "Kingdom of the Thames Estuary",
+      "tier": "port_major",
+      "capitalCountyId": "MSX",
+      "countyIds": [
+        "MSX",
+        "SUR",
+        "KNT",
+        "ESE",
+        "SUS"
+      ],
+      "deepwaterPortCountyId": "KNT"
+    },
+    {
+      "id": "kingdom_glc",
+      "name": "Kingdom of the Avon Gate",
+      "tier": "port_major",
+      "capitalCountyId": "GLC",
+      "countyIds": [
+        "GLC",
+        "WRC"
+      ],
+      "deepwaterPortCountyId": "GLC"
+    },
+    {
+      "id": "kingdom_lcs",
+      "name": "Kingdom of the Western Mersey",
+      "tier": "port_major",
+      "capitalCountyId": "LCS",
+      "countyIds": [
+        "LCS",
+        "CHE"
+      ],
+      "deepwaterPortCountyId": "LCS"
+    },
+    {
+      "id": "kingdom_nhb",
+      "name": "Kingdom of the Northern March",
+      "tier": "port_major",
+      "capitalCountyId": "NHB",
+      "countyIds": [
+        "NHB",
+        "DRH",
+        "RXB"
+      ],
+      "deepwaterPortCountyId": "NHB"
+    },
+    {
+      "id": "kingdom_merciaish",
+      "name": "Midland Crown",
+      "tier": "major",
+      "capitalCountyId": "WRW",
+      "countyIds": [
+        "BUC",
+        "HTF"
+      ]
+    },
+    {
+      "id": "kingdom_wessexish",
+      "name": "Southwestern Realm",
+      "tier": "major",
+      "capitalCountyId": "DVN",
+      "countyIds": [
+        "DVN",
+        "CNW"
+      ]
+    },
+    {
+      "id": "kingdom_wales_north",
+      "name": "North Welsh Principalities",
+      "tier": "minor",
+      "capitalCountyId": "DBH",
+      "countyIds": [
+        "DBH",
+        "FLT"
+      ]
+    }
+  ],
+  "unclaimedCountyIds": [
+    "ABN",
+    "AGL",
+    "ANG",
+    "ARG",
+    "BNF",
+    "BED",
+    "BER",
+    "BTE",
+    "CRN",
+    "CTN",
+    "CMB",
+    "CRD",
+    "CRM",
+    "CLM",
+    "CRT",
+    "CUM",
+    "DRB",
+    "DRS",
+    "DMF",
+    "DUN",
+    "FFE",
+    "HMP",
+    "HRF",
+    "HNT",
+    "INS",
+    "KNC",
+    "KNR",
+    "KCB",
+    "LCR",
+    "LNC",
+    "MRN",
+    "MTG",
+    "MOY",
+    "NRN",
+    "NRF",
+    "NHP",
+    "NOT",
+    "ORN",
+    "OXD",
+    "PBS",
+    "PMB",
+    "PRT",
+    "RDN",
+    "RNF",
+    "RSS",
+    "RTL",
+    "SKK",
+    "SHT",
+    "SHP",
+    "SMS",
+    "STF",
+    "STL",
+    "SFF",
+    "SRL",
+    "WRW",
+    "WLT",
+    "WML",
+    "WTS",
+    "YRK"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "starts": [
+    {
+      "id": "alphonsus_the_stalwart",
+      "name": "Alphonsus the Stalwart",
+      "startCountyId": "CRN",
+      "perk": { "type": "wall_defense_per_level", "value": 0.015 }
+    },
+    {
+      "id": "douglas_the_industrious",
+      "name": "Douglas the Industrious",
+      "startCountyId": "STL",
+      "perk": { "type": "mining_productivity_mult", "value": 1.10 }
+    },
+    {
+      "id": "edmund_ironside",
+      "name": "Edmund Ironside",
+      "startCountyId": "SMS",
+      "perk": { "type": "infantry_attack_mult", "value": 1.05 }
+    },
+    {
+      "id": "ulmann_the_studious",
+      "name": "Ulmann the Studious",
+      "startCountyId": "OXD",
+      "perk": { "type": "research_rate_mult", "value": 1.05 }
+    }
+  ]
+}
