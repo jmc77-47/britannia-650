@@ -3,6 +3,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useReducer,
   useRef,
@@ -27,6 +28,7 @@ const COUNTY_BASE_FILL = '#5a6550'
 const COUNTY_HOVER_FILL = '#738260'
 const COUNTY_SELECTED_FILL = '#d8ba66'
 const PLAYER_FACTION_FALLBACK_FILL = '#79c5f0'
+const FOGGED_COUNTY_FILL = '#1a2328'
 
 interface CountyTopologyProperties {
   NAME?: string
@@ -75,6 +77,7 @@ interface CountyDrawModel {
 interface LoadedMapData {
   countyFeatures: CountyFeatureCollection
   borderMesh: BorderGeometry | null
+  countyNeighborIdsByCounty: Record<string, string[]>
 }
 
 interface TooltipState {
@@ -115,6 +118,69 @@ const getCountyId = (
   properties: CountyTopologyProperties | null | undefined,
 ): string => normalizeCountyId(properties?.HCS_CODE)
 
+const collectArcIndices = (value: unknown, output: number[]) => {
+  if (!Array.isArray(value)) {
+    return
+  }
+
+  if (value.length > 0 && typeof value[0] === 'number') {
+    for (const arcIndex of value) {
+      if (typeof arcIndex === 'number') {
+        output.push(arcIndex >= 0 ? arcIndex : ~arcIndex)
+      }
+    }
+    return
+  }
+
+  for (const child of value) {
+    collectArcIndices(child, output)
+  }
+}
+
+const buildCountyAdjacency = (
+  object: TopologyObject,
+): Record<string, string[]> => {
+  const arcOwners = new Map<number, Set<string>>()
+
+  for (const geometry of object.geometries ?? []) {
+    const countyId = getCountyId(geometry.properties)
+    if (!countyId) {
+      continue
+    }
+
+    const arcIndices: number[] = []
+    collectArcIndices(geometry.arcs, arcIndices)
+    const uniqueArcIndices = new Set(arcIndices)
+    uniqueArcIndices.forEach((arcIndex) => {
+      const owners = arcOwners.get(arcIndex) ?? new Set<string>()
+      owners.add(countyId)
+      arcOwners.set(arcIndex, owners)
+    })
+  }
+
+  const adjacency = new Map<string, Set<string>>()
+  arcOwners.forEach((owners) => {
+    const ownerIds = [...owners]
+    for (let i = 0; i < ownerIds.length; i += 1) {
+      const source = ownerIds[i]
+      const linked = adjacency.get(source) ?? new Set<string>()
+      for (let j = 0; j < ownerIds.length; j += 1) {
+        if (i !== j) {
+          linked.add(ownerIds[j])
+        }
+      }
+      adjacency.set(source, linked)
+    }
+  })
+
+  const result: Record<string, string[]> = {}
+  adjacency.forEach((neighbors, countyId) => {
+    result[countyId] = [...neighbors].sort()
+  })
+
+  return result
+}
+
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
     return error.message
@@ -146,8 +212,18 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const [setupCharacterId, setSetupCharacterId] = useState<string | null>(
     initialGameState.availableCharacters[0]?.id ?? null,
   )
+  const fogIdBase = useId().replace(/:/g, '')
+  const fogMaskId = `${fogIdBase}-mask`
+  const fogRevealFilterId = `${fogIdBase}-reveal-blur`
+  const fogRevealHaloFilterId = `${fogIdBase}-reveal-halo`
+  const fogTextureFilterId = `${fogIdBase}-texture`
 
   const isSetupPhase = gameState.gamePhase === 'setup'
+  const isFogActive = gameState.gamePhase === 'playing' && gameState.fogOfWarEnabled
+  const discoveredCountyIdSet = useMemo(
+    () => new Set(gameState.discoveredCountyIds),
+    [gameState.discoveredCountyIds],
+  )
   const playerFactionCountyIdSet = useMemo(
     () => new Set(gameState.playerFactionCountyIds),
     [gameState.playerFactionCountyIds],
@@ -287,6 +363,24 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     viewport.width,
   ])
 
+  const discoveredCountiesForMask = useMemo(
+    () =>
+      projectedMap.counties.filter((county) =>
+        discoveredCountyIdSet.has(county.id),
+      ),
+    [discoveredCountyIdSet, projectedMap.counties],
+  )
+
+  const fogBounds = useMemo(
+    () => ({
+      x: -viewport.width * 3,
+      y: -viewport.height * 3,
+      width: viewport.width * 7,
+      height: viewport.height * 7,
+    }),
+    [viewport.height, viewport.width],
+  )
+
   const selectedCounty = useMemo(
     () =>
       projectedMap.counties.find(
@@ -377,8 +471,18 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     }
   }, [tooltip, viewport.height, viewport.width])
 
+  const isCountyDiscovered = useCallback(
+    (countyId: string) =>
+      !isFogActive || discoveredCountyIdSet.has(normalizeCountyId(countyId)),
+    [discoveredCountyIdSet, isFogActive],
+  )
+
   const getCountyFill = useCallback(
     (county: CountyDrawModel): string => {
+      if (!isCountyDiscovered(county.id)) {
+        return FOGGED_COUNTY_FILL
+      }
+
       if (county.id === gameState.selectedCountyId) {
         return COUNTY_SELECTED_FILL
       }
@@ -398,6 +502,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       gameState.playerFactionColor,
       gameState.selectedCountyId,
       hoveredCountyId,
+      isCountyDiscovered,
       playerFactionCountyIdSet,
     ],
   )
@@ -405,6 +510,11 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const updateTooltip = useCallback(
     (countyId: string, clientX: number, clientY: number) => {
       if (isDragging || isSetupPhase) {
+        return
+      }
+      if (!isCountyDiscovered(countyId)) {
+        setHoveredCountyId(null)
+        setTooltip(null)
         return
       }
 
@@ -420,7 +530,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         y: clientY - hostRect.top,
       })
     },
-    [isDragging, isSetupPhase],
+    [isCountyDiscovered, isDragging, isSetupPhase],
   )
 
   const closeTooltip = useCallback(() => {
@@ -555,25 +665,58 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       if (isSetupPhase || dragMovedRef.current) {
         return
       }
+      if (!isCountyDiscovered(countyId)) {
+        return
+      }
 
       dispatch({
         type: 'SELECT_COUNTY',
         countyId,
       })
     },
-    [isSetupPhase],
+    [isCountyDiscovered, isSetupPhase],
+  )
+
+  const computeInitialDiscoveredCountyIds = useCallback(
+    (startCountyId: string): string[] => {
+      const normalizedStartCountyId = normalizeCountyId(startCountyId)
+      if (!normalizedStartCountyId) {
+        return []
+      }
+
+      const discoveredCountyIds = new Set<string>()
+      discoveredCountyIds.add(normalizedStartCountyId)
+      const neighbors =
+        mapData.countyNeighborIdsByCounty[normalizedStartCountyId] ?? []
+      neighbors.forEach((neighborId) => {
+        const normalizedNeighborId = normalizeCountyId(neighborId)
+        if (normalizedNeighborId) {
+          discoveredCountyIds.add(normalizedNeighborId)
+        }
+      })
+
+      return [...discoveredCountyIds]
+    },
+    [mapData.countyNeighborIdsByCounty],
   )
 
   const beginCampaign = useCallback(() => {
     if (!setupCharacterId) {
       return
     }
+    const selectedCharacter = gameState.availableCharacters.find(
+      (character) => character.id === setupCharacterId,
+    )
+    const discoveredCountyIds = selectedCharacter
+      ? computeInitialDiscoveredCountyIds(selectedCharacter.startCountyId)
+      : []
 
     dispatch({
       type: 'BEGIN_GAME_WITH_CHARACTER',
       characterId: setupCharacterId,
+      discoveredCountyIds,
     })
-  }, [setupCharacterId])
+  }, [computeInitialDiscoveredCountyIds, gameState.availableCharacters, setupCharacterId])
 
   const openSetup = useCallback(() => {
     setSetupCharacterId(gameState.availableCharacters[0]?.id ?? null)
@@ -609,10 +752,92 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
             y={0}
           />
 
+          {isFogActive && (
+            <defs>
+              <filter
+                height="140%"
+                id={fogRevealFilterId}
+                width="140%"
+                x="-20%"
+                y="-20%"
+              >
+                <feGaussianBlur stdDeviation="8.4" />
+              </filter>
+              <filter
+                height="160%"
+                id={fogRevealHaloFilterId}
+                width="160%"
+                x="-30%"
+                y="-30%"
+              >
+                <feGaussianBlur stdDeviation="16" />
+              </filter>
+              <filter
+                height="140%"
+                id={fogTextureFilterId}
+                width="140%"
+                x="-20%"
+                y="-20%"
+              >
+                <feTurbulence
+                  baseFrequency="0.035"
+                  numOctaves="2"
+                  result="noise"
+                  seed="7"
+                  type="fractalNoise"
+                />
+                <feColorMatrix in="noise" result="mono" type="saturate" values="0" />
+                <feComponentTransfer in="mono" result="grain">
+                  <feFuncR tableValues="0 0.16" type="table" />
+                  <feFuncG tableValues="0 0.16" type="table" />
+                  <feFuncB tableValues="0 0.16" type="table" />
+                  <feFuncA tableValues="0 0.24" type="table" />
+                </feComponentTransfer>
+                <feBlend in="SourceGraphic" in2="grain" mode="screen" />
+              </filter>
+              <mask
+                height={fogBounds.height}
+                id={fogMaskId}
+                maskContentUnits="userSpaceOnUse"
+                maskUnits="userSpaceOnUse"
+                width={fogBounds.width}
+                x={fogBounds.x}
+                y={fogBounds.y}
+              >
+                <rect
+                  fill="white"
+                  height={fogBounds.height}
+                  width={fogBounds.width}
+                  x={fogBounds.x}
+                  y={fogBounds.y}
+                />
+                <g filter={`url(#${fogRevealFilterId})`}>
+                  {discoveredCountiesForMask.map((county) => (
+                    <path d={county.d} fill="black" key={`fog-visible-${county.id}`} />
+                  ))}
+                </g>
+                <g filter={`url(#${fogRevealHaloFilterId})`}>
+                  {discoveredCountiesForMask.map((county) => (
+                    <path
+                      d={county.d}
+                      fill="none"
+                      key={`fog-visible-halo-${county.id}`}
+                      stroke="black"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={34}
+                    />
+                  ))}
+                </g>
+              </mask>
+            </defs>
+          )}
+
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.scale})`}>
             <g className="county-layer">
               {projectedMap.counties.map((county) => {
                 const isPlayerCounty = playerFactionCountyIdSet.has(county.id)
+                const countyDiscovered = isCountyDiscovered(county.id)
                 return (
                   <path
                     className={`county-fill${hoveredCountyId === county.id ? ' is-hovered' : ''}${
@@ -629,6 +854,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
                     onMouseMove={(event) =>
                       updateTooltip(county.id, event.clientX, event.clientY)
                     }
+                    pointerEvents={countyDiscovered ? 'auto' : 'none'}
                   />
                 )
               })}
@@ -637,7 +863,11 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
             {gameState.gamePhase === 'playing' && (
               <g className="player-county-layer">
                 {projectedMap.counties
-                  .filter((county) => playerFactionCountyIdSet.has(county.id))
+                  .filter(
+                    (county) =>
+                      playerFactionCountyIdSet.has(county.id) &&
+                      isCountyDiscovered(county.id),
+                  )
                   .map((county) => (
                     <g key={`player-county-${county.id}`}>
                       <path
@@ -662,6 +892,28 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
             {selectedCounty && (
               <g className="selection-layer">
                 <path className="selected-outline" d={selectedCounty.d} />
+              </g>
+            )}
+
+            {isFogActive && (
+              <g className="fog-layer">
+                <rect
+                  className="fog-overlay"
+                  height={fogBounds.height}
+                  mask={`url(#${fogMaskId})`}
+                  width={fogBounds.width}
+                  x={fogBounds.x}
+                  y={fogBounds.y}
+                />
+                <rect
+                  className="fog-texture"
+                  filter={`url(#${fogTextureFilterId})`}
+                  height={fogBounds.height}
+                  mask={`url(#${fogMaskId})`}
+                  width={fogBounds.width}
+                  x={fogBounds.x}
+                  y={fogBounds.y}
+                />
               </g>
             )}
           </g>
@@ -696,6 +948,13 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         )}
         {!isSetupPhase && (
           <div className="macro-banner-actions">
+            <button
+              className="secondary-button macro-fog-toggle-button"
+              onClick={() => dispatch({ type: 'TOGGLE_FOG_OF_WAR' })}
+              type="button"
+            >
+              Fog of War: {gameState.fogOfWarEnabled ? 'On' : 'Off'}
+            </button>
             <button
               className="secondary-button macro-new-game-button"
               onClick={openSetup}
@@ -797,6 +1056,7 @@ function App() {
         }
 
         const topologyObject = topologyData.objects[objectName]
+        const countyNeighborIdsByCounty = buildCountyAdjacency(topologyObject)
         const countyFeatures = topoFeature(
           topologyData,
           topologyObject,
@@ -814,6 +1074,7 @@ function App() {
         setMapData({
           countyFeatures,
           borderMesh,
+          countyNeighborIdsByCounty,
         })
         setInitialGameState(initialState)
       } catch (error) {

@@ -32,6 +32,8 @@ export interface GameState {
   playerFactionName: string | null
   playerFactionColor: string | null
   playerFactionCountyIds: string[]
+  fogOfWarEnabled: boolean
+  discoveredCountyIds: string[]
   availableCharacters: StartCharacter[]
   kingdoms: KingdomGameState[]
   counties: Record<string, CountyGameState>
@@ -237,6 +239,8 @@ export const createInitialGameState = async (): Promise<GameState> => {
     playerFactionName: null,
     playerFactionColor: null,
     playerFactionCountyIds: [],
+    fogOfWarEnabled: true,
+    discoveredCountyIds: [],
     availableCharacters: parseStartCharacters(startsPayload),
     kingdoms: parseKingdoms(kingdomsPayload),
     counties: parseCountyState(countyMetadata),

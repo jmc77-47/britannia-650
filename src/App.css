@@ -293,6 +293,13 @@
   font-size: 0.82rem;
 }
 
+.macro-fog-toggle-button {
+  min-width: 10.2rem;
+  padding-top: 0.44rem;
+  padding-bottom: 0.44rem;
+  font-size: 0.82rem;
+}
+
 .MacroPanel {
   position: fixed;
   top: 1rem;

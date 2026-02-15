@@ -12,10 +12,26 @@ export type GameAction =
   | {
       type: 'BEGIN_GAME_WITH_CHARACTER'
       characterId: string
+      discoveredCountyIds?: string[]
     }
   | {
       type: 'OPEN_SETUP'
     }
+  | {
+      type: 'TOGGLE_FOG_OF_WAR'
+    }
+
+const normalizeCountyIdList = (countyIds: string[]): string[] => {
+  const uniqueCountyIds = new Set<string>()
+  countyIds.forEach((countyId) => {
+    const normalizedCountyId = normalizeCountyId(countyId)
+    if (normalizedCountyId) {
+      uniqueCountyIds.add(normalizedCountyId)
+    }
+  })
+
+  return [...uniqueCountyIds]
+}
 
 export const gameReducer = (state: GameState, action: GameAction): GameState => {
   if (action.type === 'OPEN_SETUP') {
@@ -30,6 +46,8 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionName: null,
       playerFactionColor: null,
       playerFactionCountyIds: [],
+      fogOfWarEnabled: true,
+      discoveredCountyIds: [],
       pendingOrders: [],
     }
   }
@@ -51,6 +69,12 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       : startingCountyId
         ? [startingCountyId]
         : []
+    const discoveredCountyIds = normalizeCountyIdList(
+      action.discoveredCountyIds ?? [startingCountyId],
+    )
+    if (startingCountyId && !discoveredCountyIds.includes(startingCountyId)) {
+      discoveredCountyIds.push(startingCountyId)
+    }
 
     return {
       ...state,
@@ -63,7 +87,23 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionName: kingdom?.name ?? `${selectedCharacter.name}'s Realm`,
       playerFactionColor: kingdom?.color ?? '#f3c94b',
       playerFactionCountyIds,
+      fogOfWarEnabled: true,
+      discoveredCountyIds,
       pendingOrders: [],
+    }
+  }
+
+  if (action.type === 'TOGGLE_FOG_OF_WAR') {
+    const nextFogState = !state.fogOfWarEnabled
+    const shouldClearSelection =
+      nextFogState &&
+      state.selectedCountyId !== null &&
+      !state.discoveredCountyIds.includes(state.selectedCountyId)
+
+    return {
+      ...state,
+      fogOfWarEnabled: nextFogState,
+      selectedCountyId: shouldClearSelection ? null : state.selectedCountyId,
     }
   }
 
@@ -78,6 +118,9 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
         ...state,
         selectedCountyId: null,
       }
+    }
+    if (state.fogOfWarEnabled && !state.discoveredCountyIds.includes(countyId)) {
+      return state
     }
 
     return {
