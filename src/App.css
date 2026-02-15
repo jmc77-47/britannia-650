@@ -220,50 +220,17 @@
   stroke: rgba(224, 214, 185, 0.52);
 }
 
-.marker-glyph {
-  fill: none;
-  stroke: #f0e3c0;
-  stroke-width: 0.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
+.marker-emoji {
+  font-size: 6.2px;
+  line-height: 1;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(7, 11, 14, 0.72);
+  stroke-width: 0.2;
 }
 
-.marker-glyph-port {
-  stroke: #d2e7f3;
-}
-
-.marker-glyph-fort {
-  fill: rgba(242, 206, 158, 0.9);
-  stroke: rgba(66, 45, 31, 0.88);
-}
-
-.marker-glyph-fort .marker-glyph-cutout {
-  fill: rgba(28, 20, 14, 0.72);
-  stroke: none;
-}
-
-.marker-glyph-market {
-  fill: rgba(230, 201, 145, 0.88);
-  stroke: rgba(63, 45, 29, 0.84);
-}
-
-.marker-glyph-farm {
-  stroke: rgba(219, 235, 186, 0.94);
-}
-
-.marker-glyph-lumber {
-  fill: rgba(192, 139, 103, 0.9);
-  stroke: rgba(70, 43, 28, 0.86);
-}
-
-.marker-glyph-mine {
-  stroke: rgba(196, 211, 220, 0.92);
-}
-
-.marker-glyph-quarry {
-  fill: rgba(186, 194, 200, 0.88);
-  stroke: rgba(66, 74, 82, 0.9);
+.marker-emoji-port {
+  font-size: 6px;
 }
 
 .county-marker-overflow text {
