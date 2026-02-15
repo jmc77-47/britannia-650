@@ -1,6 +1,5 @@
+import { useMemo, useState } from 'react'
 import {
-  BUILDING_DEFINITIONS,
-  BUILDING_ORDER,
   MAX_TRACK_LEVEL,
   TRACK_LABEL_BY_ID,
   type BuildingType,
@@ -10,8 +9,6 @@ import {
 } from '../game/buildings'
 import { getNonZeroResourceDeltaEntries } from '../game/economy'
 import type { CountyBuildOrder } from '../game/state'
-
-export type MacroPanelTab = 'BUILD' | 'TROOPS' | 'RESEARCH' | 'POLICIES'
 
 export interface MacroPanelCounty {
   id: string
@@ -28,6 +25,12 @@ export interface TrackUpgradeOption {
   populationImpactLabel: string
   canUpgrade: boolean
   disabledReason?: string
+}
+
+export interface StorageRiskEntry {
+  key: StorableResourceKey
+  current: number
+  cap: number
 }
 
 interface MacroPanelProps {
@@ -56,8 +59,7 @@ interface MacroPanelProps {
   warehouseUpgradeDisabledReason?: string
   warehouseActiveOrder: CountyBuildOrder | null
   warehouseQueuedOrders: CountyBuildOrder[]
-  activeTab: MacroPanelTab
-  onTabChange: (tab: MacroPanelTab) => void
+  storageRiskEntries: StorageRiskEntry[]
   onQueueTrackUpgrade: (trackType: UpgradeTrackType) => void
   onQueueWarehouseUpgrade: () => void
   onRemoveQueuedBuildOrder: (queueIndex: number) => void
@@ -65,18 +67,14 @@ interface MacroPanelProps {
   onEndTurn: () => void
 }
 
-const PANEL_TABS: { id: MacroPanelTab; label: string }[] = [
-  { id: 'BUILD', label: 'Build' },
-  { id: 'TROOPS', label: 'Troops' },
-  { id: 'RESEARCH', label: 'Research' },
-  { id: 'POLICIES', label: 'Policies' },
-]
+type SectionId = 'overview' | 'build' | 'economy' | 'kingdom'
+type BuildView = 'RECOMMENDED' | 'ALL'
 
-const STUB_COPY: Record<MacroPanelTab, string> = {
-  BUILD: 'County development orders resolve at End Turn.',
-  TROOPS: 'Troop muster and movement orders will plug in next.',
-  RESEARCH: 'Realm research trees are scaffolded for a later milestone.',
-  POLICIES: 'Policy toggles and realm laws are planned for later.',
+interface Recommendation {
+  key: string
+  kind: 'county' | 'warehouse'
+  reason: string
+  trackType?: UpgradeTrackType
 }
 
 const STORAGE_CAP_ORDER: { key: StorableResourceKey; label: string }[] = [
@@ -88,6 +86,51 @@ const STORAGE_CAP_ORDER: { key: StorableResourceKey; label: string }[] = [
   { key: 'leather', label: 'Leather' },
   { key: 'horses', label: 'Horses' },
 ]
+
+const TRACK_ICON_BY_TYPE: Record<UpgradeTrackType, string> = {
+  FARM: '🌾',
+  HOMESTEADS: '🏠',
+  LUMBER_CAMP: '🪵',
+  QUARRY: '🧱',
+  MINE: '⛏️',
+  PASTURE: '🐎',
+  TANNERY: '🧴',
+  WEAVERY: '🧶',
+  MARKET: '🏛️',
+  PALISADE: '🛡️',
+  ROADS: '🛣️',
+  WAREHOUSE: '📦',
+}
+
+const CATEGORY_GROUPS: Array<{ title: string; tracks: UpgradeTrackType[] }> = [
+  { title: 'Growth', tracks: ['FARM', 'HOMESTEADS'] },
+  { title: 'Income', tracks: ['MARKET'] },
+  { title: 'Materials', tracks: ['LUMBER_CAMP', 'QUARRY'] },
+  { title: 'Industry', tracks: ['MINE', 'WEAVERY', 'TANNERY', 'PASTURE'] },
+  { title: 'Defense', tracks: ['PALISADE'] },
+  { title: 'Infrastructure', tracks: ['ROADS'] },
+]
+
+const RESOURCE_LABEL_BY_KEY: Record<StorableResourceKey, string> = {
+  gold: 'Gold',
+  wood: 'Wood',
+  stone: 'Stone',
+  iron: 'Iron',
+  wool: 'Wool',
+  leather: 'Leather',
+  horses: 'Horses',
+}
+
+const toCostChips = (costLabel: string): string[] => {
+  if (costLabel === 'No cost' || costLabel === 'Max level reached') {
+    return [costLabel]
+  }
+
+  return costLabel
+    .split(' + ')
+    .map((chip) => chip.trim())
+    .filter((chip) => chip.length > 0)
+}
 
 export function MacroPanel({
   turnNumber,
@@ -115,19 +158,267 @@ export function MacroPanel({
   warehouseUpgradeDisabledReason,
   warehouseActiveOrder,
   warehouseQueuedOrders,
-  activeTab,
-  onTabChange,
+  storageRiskEntries,
   onQueueTrackUpgrade,
   onQueueWarehouseUpgrade,
   onRemoveQueuedBuildOrder,
   onRemoveQueuedWarehouseOrder,
   onEndTurn,
 }: MacroPanelProps) {
+  const [openSections, setOpenSections] = useState<Record<SectionId, boolean>>({
+    overview: true,
+    build: true,
+    economy: false,
+    kingdom: false,
+  })
+  const [buildView, setBuildView] = useState<BuildView>('RECOMMENDED')
+  const [showAllCaps, setShowAllCaps] = useState(false)
+
   const hasSelectedCounty = selectedCounty !== null
   const selectedCountyYieldEntries = getNonZeroResourceDeltaEntries(selectedCountyYields)
-  const builtBuildingTracks = BUILDING_ORDER.filter(
-    (buildingType) => (selectedCountyBuildingLevels[buildingType] ?? 0) > 0,
+  const trackByType = useMemo(
+    () => new Map(trackUpgradeOptions.map((track) => [track.trackType, track])),
+    [trackUpgradeOptions],
   )
+
+  const toggleSection = (sectionId: SectionId) => {
+    setOpenSections((current) => ({
+      ...current,
+      [sectionId]: !current[sectionId],
+    }))
+  }
+
+  const activeOrderTrackLevel = (() => {
+    if (!activeBuildOrder) {
+      return 0
+    }
+
+    if (activeBuildOrder.trackType === 'ROADS') {
+      return selectedCountyRoadLevel
+    }
+
+    if (activeBuildOrder.trackType === 'WAREHOUSE') {
+      return warehouseLevel
+    }
+
+    return selectedCountyBuildingLevels[activeBuildOrder.trackType] ?? 0
+  })()
+
+  const workforceEfficiency =
+    selectedCountyPopulationUsed <= 0
+      ? 100
+      : Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round((selectedCountyPopulation / selectedCountyPopulationUsed) * 100),
+          ),
+        )
+
+  const recommendations = useMemo<Recommendation[]>(() => {
+    const items: Recommendation[] = []
+    const seen = new Set<string>()
+
+    const addTrackRecommendation = (trackType: UpgradeTrackType, reason: string) => {
+      if (!trackByType.has(trackType)) {
+        return
+      }
+      const key = `track-${trackType}`
+      if (seen.has(key)) {
+        return
+      }
+      seen.add(key)
+      items.push({
+        key,
+        kind: 'county',
+        reason,
+        trackType,
+      })
+    }
+
+    const addWarehouseRecommendation = (reason: string) => {
+      const key = 'warehouse'
+      if (seen.has(key)) {
+        return
+      }
+      seen.add(key)
+      items.push({
+        key,
+        kind: 'warehouse',
+        reason,
+      })
+    }
+
+    if (!hasSelectedCounty || !selectedCountyOwned) {
+      return items
+    }
+
+    if (selectedCountySlotsUsed >= selectedCountySlotsCap) {
+      addTrackRecommendation('MARKET', 'Slots are full; improve existing income tracks.')
+      addTrackRecommendation('LUMBER_CAMP', 'Slots are full; strengthen existing material output.')
+      addTrackRecommendation('FARM', 'Expand Farm to unlock more specialization slots.')
+    }
+
+    if (
+      selectedCountyPopulationFree <= 0 ||
+      selectedCountyPopulationUsed >= selectedCountyPopulation
+    ) {
+      addTrackRecommendation('FARM', 'Population is constrained; increase capacity.')
+      addTrackRecommendation('HOMESTEADS', 'Homesteads improve population growth momentum.')
+    }
+
+    if ((selectedCountyYields.wood ?? 0) < 6) {
+      addTrackRecommendation('LUMBER_CAMP', 'Wood income is low for early expansion.')
+    }
+
+    if ((selectedCountyYields.gold ?? 0) < 8) {
+      addTrackRecommendation('MARKET', 'Gold income is low for sustained upgrades.')
+    }
+
+    if ((selectedCountyYields.iron ?? 0) <= 0) {
+      addTrackRecommendation('MINE', 'Add iron output for military and industry lines.')
+    }
+
+    if (storageRiskEntries.length > 0) {
+      addWarehouseRecommendation('Storage is nearing cap; expand Warehouse.')
+    }
+
+    trackUpgradeOptions
+      .filter((track) => track.canUpgrade && track.trackType !== 'ROADS')
+      .slice(0, 4)
+      .forEach((track) => {
+        addTrackRecommendation(track.trackType, 'Low-friction upgrade available now.')
+      })
+
+    return items.slice(0, 6)
+  }, [
+    hasSelectedCounty,
+    selectedCountyOwned,
+    selectedCountyPopulation,
+    selectedCountyPopulationFree,
+    selectedCountyPopulationUsed,
+    selectedCountySlotsCap,
+    selectedCountySlotsUsed,
+    selectedCountyYields.gold,
+    selectedCountyYields.iron,
+    selectedCountyYields.wood,
+    storageRiskEntries.length,
+    trackByType,
+    trackUpgradeOptions,
+  ])
+
+  const groupedTracks = useMemo(
+    () =>
+      CATEGORY_GROUPS.map((group) => ({
+        title: group.title,
+        tracks: group.tracks
+          .map((trackType) => trackByType.get(trackType))
+          .filter((track): track is TrackUpgradeOption => !!track),
+      })).filter((group) => group.tracks.length > 0),
+    [trackByType],
+  )
+
+  const visibleCapEntries = showAllCaps
+    ? STORAGE_CAP_ORDER
+    : STORAGE_CAP_ORDER.filter((entry) => ['gold', 'wood', 'stone'].includes(entry.key))
+
+  const renderTrackRow = (track: TrackUpgradeOption, badgeText?: string) => {
+    const nextLevel = Math.min(MAX_TRACK_LEVEL, track.level + 1)
+    const costChips = toCostChips(track.costLabel)
+
+    return (
+      <li className="upgrade-card" key={`track-card-${track.trackType}-${badgeText ?? 'all'}`}>
+        <div className="upgrade-card-main">
+          <div className="upgrade-card-icon" aria-hidden="true">
+            {TRACK_ICON_BY_TYPE[track.trackType]}
+          </div>
+          <div className="upgrade-card-copy">
+            <p className="upgrade-card-title">
+              <strong>{track.label}</strong>{' '}
+              <span className="stats-muted">
+                L{track.level} → L{nextLevel}
+              </span>
+            </p>
+            {badgeText && <p className="upgrade-card-reason">{badgeText}</p>}
+            <p className="upgrade-card-subtle">{track.yieldLabel}</p>
+            <p className="upgrade-card-subtle">{track.populationImpactLabel}</p>
+            {!track.canUpgrade && track.disabledReason && (
+              <p className="upgrade-disabled-reason">{track.disabledReason}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="upgrade-card-actions">
+          <div className="upgrade-card-chips">
+            {costChips.map((chip) => (
+              <span className="upgrade-chip" key={`${track.trackType}-chip-${chip}`}>
+                {chip}
+              </span>
+            ))}
+            <span className="upgrade-chip is-turns">
+              {track.turnsRequired} turn{track.turnsRequired === 1 ? '' : 's'}
+            </span>
+          </div>
+          <button
+            className="secondary-button queue-remove-button"
+            disabled={!track.canUpgrade}
+            onClick={() => onQueueTrackUpgrade(track.trackType)}
+            type="button"
+          >
+            Upgrade
+          </button>
+        </div>
+      </li>
+    )
+  }
+
+  const renderWarehouseRow = (badgeText?: string) => {
+    const costChips = toCostChips(warehouseUpgradeCostLabel)
+
+    return (
+      <li className="upgrade-card" key={`warehouse-card-${badgeText ?? 'base'}`}>
+        <div className="upgrade-card-main">
+          <div className="upgrade-card-icon" aria-hidden="true">
+            {TRACK_ICON_BY_TYPE.WAREHOUSE}
+          </div>
+          <div className="upgrade-card-copy">
+            <p className="upgrade-card-title">
+              <strong>Warehouse</strong>{' '}
+              <span className="stats-muted">
+                L{warehouseLevel} → L{Math.min(MAX_TRACK_LEVEL, warehouseLevel + 1)}
+              </span>
+            </p>
+            {badgeText && <p className="upgrade-card-reason">{badgeText}</p>}
+            <p className="upgrade-card-subtle">Expands storage caps across the kingdom.</p>
+            {!warehouseCanUpgrade && warehouseUpgradeDisabledReason && (
+              <p className="upgrade-disabled-reason">{warehouseUpgradeDisabledReason}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="upgrade-card-actions">
+          <div className="upgrade-card-chips">
+            {costChips.map((chip) => (
+              <span className="upgrade-chip" key={`warehouse-chip-${chip}`}>
+                {chip}
+              </span>
+            ))}
+            <span className="upgrade-chip is-turns">
+              {warehouseUpgradeTurns} turn{warehouseUpgradeTurns === 1 ? '' : 's'}
+            </span>
+          </div>
+          <button
+            className="secondary-button queue-remove-button"
+            disabled={!warehouseCanUpgrade}
+            onClick={onQueueWarehouseUpgrade}
+            type="button"
+          >
+            Upgrade
+          </button>
+        </div>
+      </li>
+    )
+  }
 
   return (
     <aside className="HudPanel MacroPanel" aria-label="Macro controls">
@@ -136,148 +427,51 @@ export function MacroPanel({
         <p className="macro-panel-turn">
           Turn #: <strong>{turnNumber}</strong>
         </p>
-        <p className="macro-panel-selection">
-          <strong>Selected County:</strong>{' '}
-          {selectedCounty ? (
-            <>
-              {selectedCounty.name} <span className="county-code">{selectedCounty.id}</span>
-            </>
-          ) : (
-            'None selected'
-          )}
-        </p>
       </section>
 
-      <section className="drawer-section">
-        <div className="macro-tab-list" role="tablist" aria-label="Macro tabs">
-          {PANEL_TABS.map((tab) => (
-            <button
-              aria-selected={activeTab === tab.id}
-              className={`secondary-button macro-tab-button${
-                activeTab === tab.id ? ' is-active' : ''
-              }`}
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              role="tab"
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="macro-tab-body" role="tabpanel">
-          <p className="subtle">{STUB_COPY[activeTab]}</p>
-        </div>
-      </section>
+      <section className="drawer-section development-section premium-section">
+        <button
+          aria-expanded={openSections.overview}
+          className="section-toggle"
+          onClick={() => toggleSection('overview')}
+          type="button"
+        >
+          <span>County Overview</span>
+          <span>{openSections.overview ? '−' : '+'}</span>
+        </button>
 
-      <section className="drawer-section development-section">
-        <div className="development-header">
-          <h3>Kingdom Logistics</h3>
-          <span className="building-tag">Warehouse L{warehouseLevel}/{MAX_TRACK_LEVEL}</span>
-        </div>
-
-        <div className="development-block">
-          <p className="development-subheading">Storage Caps</p>
-          <ul className="storage-cap-list">
-            {STORAGE_CAP_ORDER.map((resource) => (
-              <li key={`storage-cap-${resource.key}`}>
-                <span>{resource.label}</span>
-                <strong>{warehouseCaps[resource.key]}</strong>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="development-block">
-          <p className="development-subheading">Upgrade Warehouse</p>
-          <div className="queue-item">
-            <div>
-              <strong>Warehouse +1</strong>
-              <span>
-                {warehouseUpgradeCostLabel} • {warehouseUpgradeTurns} turn
-                {warehouseUpgradeTurns === 1 ? '' : 's'}
+        {openSections.overview && (
+          <div className="panel-section-body">
+            <div className="development-header">
+              <h3>
+                {selectedCounty ? (
+                  <>
+                    {selectedCounty.name} <span className="county-code">{selectedCounty.id}</span>
+                  </>
+                ) : (
+                  'No County Selected'
+                )}
+              </h3>
+              <span
+                className={`ownership-pill${selectedCountyOwned ? ' is-owned' : ' is-foreign'}`}
+              >
+                {selectedCountyOwned ? 'Owned' : 'Not owned'}
               </span>
             </div>
-            <button
-              className="secondary-button queue-remove-button"
-              disabled={!warehouseCanUpgrade}
-              onClick={onQueueWarehouseUpgrade}
-              type="button"
-            >
-              Upgrade
-            </button>
-          </div>
-          {!warehouseCanUpgrade && warehouseUpgradeDisabledReason && (
-            <p className="upgrade-disabled-reason">{warehouseUpgradeDisabledReason}</p>
-          )}
-        </div>
 
-        <div className="development-block">
-          <p className="development-subheading">Warehouse Queue</p>
-          {warehouseActiveOrder ? (
-            <div className="queue-item">
+            <dl className="overview-grid">
               <div>
-                <strong>{TRACK_LABEL_BY_ID[warehouseActiveOrder.trackType]}</strong>
-                <span>{warehouseActiveOrder.turnsRemaining} turn(s) remaining</span>
+                <dt>Population</dt>
+                <dd>{selectedCountyPopulation} / {selectedCountyPopulationCap}</dd>
               </div>
-            </div>
-          ) : (
-            <p className="queue-empty">No active warehouse project.</p>
-          )}
-
-          {warehouseQueuedOrders.length > 0 ? (
-            <ul className="queue-list">
-              {warehouseQueuedOrders.map((order, queueIndex) => (
-                <li className="queue-item" key={order.id}>
-                  <div>
-                    <strong>{TRACK_LABEL_BY_ID[order.trackType]}</strong>
-                    <span>{order.turnsRemaining} turn(s)</span>
-                  </div>
-                  <button
-                    className="secondary-button queue-remove-button"
-                    onClick={() => onRemoveQueuedWarehouseOrder(queueIndex)}
-                    type="button"
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="queue-empty">No queued warehouse upgrades.</p>
-          )}
-        </div>
-      </section>
-
-      {hasSelectedCounty && (
-        <section className="drawer-section development-section">
-          <div className="development-header">
-            <h3>Development</h3>
-            <span
-              className={`ownership-pill${selectedCountyOwned ? ' is-owned' : ' is-foreign'}`}
-            >
-              {selectedCountyOwned ? 'Owned' : 'Not owned'}
-            </span>
-          </div>
-
-          <div className="development-tags">
-            {builtBuildingTracks.length > 0 ? (
-              builtBuildingTracks.map((buildingType) => (
-                <span className="building-tag" key={`building-tag-${buildingType}`}>
-                  {BUILDING_DEFINITIONS[buildingType].badge} L{selectedCountyBuildingLevels[buildingType]}
-                </span>
-              ))
-            ) : (
-              <span className="building-tag is-empty">No county upgrades yet</span>
-            )}
-            {selectedCountyDefense > 0 && (
-              <span className="building-tag is-defense">Defense +{selectedCountyDefense}</span>
-            )}
-          </div>
-
-          <div className="development-block">
-            <p className="development-subheading">County stats</p>
-            <dl className="county-stats-list">
+              <div>
+                <dt>Workers</dt>
+                <dd>{selectedCountyPopulationUsed} / {selectedCountyPopulationFree}</dd>
+              </div>
+              <div>
+                <dt>Slots</dt>
+                <dd>{selectedCountySlotsUsed} / {selectedCountySlotsCap}</dd>
+              </div>
               <div>
                 <dt>Roads</dt>
                 <dd>
@@ -292,111 +486,256 @@ export function MacroPanel({
                 <dd>{selectedCountyDefense}</dd>
               </div>
               <div>
-                <dt>Population</dt>
-                <dd>{selectedCountyPopulation} / {selectedCountyPopulationCap}</dd>
-              </div>
-              <div>
-                <dt>Workers</dt>
-                <dd>{selectedCountyPopulationUsed} used / {selectedCountyPopulationFree} free</dd>
-              </div>
-              <div>
-                <dt>Slots</dt>
-                <dd>{selectedCountySlotsUsed} / {selectedCountySlotsCap}</dd>
+                <dt>Queue</dt>
+                <dd>{queuedBuildOrders.length > 0 ? `Queue: ${queuedBuildOrders.length}` : 'Queue: 0'}</dd>
               </div>
             </dl>
-          </div>
 
-          <div className="development-block">
-            <p className="development-subheading">Yields per turn</p>
-            {selectedCountyYieldEntries.length > 0 ? (
-              <ul className="county-yield-list">
-                {selectedCountyYieldEntries.map((entry) => (
-                  <li key={`county-yield-${entry.key}`}>
-                    <span>{entry.label}</span>
-                    <strong>+{entry.amount}</strong>
-                  </li>
-                ))}
-              </ul>
+            <div className="overview-inline-note">
+              {activeBuildOrder ? (
+                <span>
+                  Active: {TRACK_LABEL_BY_ID[activeBuildOrder.trackType]} L{activeOrderTrackLevel} → L{Math.min(MAX_TRACK_LEVEL, activeOrderTrackLevel + 1)} ({activeBuildOrder.turnsRemaining} turn{activeBuildOrder.turnsRemaining === 1 ? '' : 's'} left)
+                </span>
+              ) : (
+                <span>No active county build.</span>
+              )}
+            </div>
+            <p className="overview-hint subtle">Press Enter to end turn.</p>
+          </div>
+        )}
+      </section>
+
+      <section className="drawer-section development-section premium-section">
+        <button
+          aria-expanded={openSections.build}
+          className="section-toggle"
+          onClick={() => toggleSection('build')}
+          type="button"
+        >
+          <span>Build & Upgrade</span>
+          <span>{openSections.build ? '−' : '+'}</span>
+        </button>
+
+        {openSections.build && (
+          <div className="panel-section-body">
+            <div className="build-tab-list" role="tablist" aria-label="Build view tabs">
+              <button
+                aria-selected={buildView === 'RECOMMENDED'}
+                className={`secondary-button build-tab-button${buildView === 'RECOMMENDED' ? ' is-active' : ''}`}
+                onClick={() => setBuildView('RECOMMENDED')}
+                role="tab"
+                type="button"
+              >
+                Recommended
+              </button>
+              <button
+                aria-selected={buildView === 'ALL'}
+                className={`secondary-button build-tab-button${buildView === 'ALL' ? ' is-active' : ''}`}
+                onClick={() => setBuildView('ALL')}
+                role="tab"
+                type="button"
+              >
+                All
+              </button>
+            </div>
+
+            {buildView === 'RECOMMENDED' ? (
+              !hasSelectedCounty || !selectedCountyOwned ? (
+                <p className="queue-empty">Select an owned county to build.</p>
+              ) : recommendations.length === 0 ? (
+                <p className="queue-empty">No high-priority recommendation right now.</p>
+              ) : (
+                <ul className="upgrade-card-list">
+                  {recommendations.map((recommendation) => {
+                    if (recommendation.kind === 'warehouse') {
+                      return renderWarehouseRow(recommendation.reason)
+                    }
+
+                    const recommendationTrack = recommendation.trackType
+                      ? trackByType.get(recommendation.trackType)
+                      : undefined
+                    if (!recommendationTrack) {
+                      return null
+                    }
+
+                    return renderTrackRow(recommendationTrack, recommendation.reason)
+                  })}
+                </ul>
+              )
+            ) : !hasSelectedCounty || !selectedCountyOwned ? (
+              <p className="queue-empty">Select an owned county to view full build tracks.</p>
             ) : (
-              <p className="queue-empty">No per-turn yields from this county.</p>
-            )}
-          </div>
-
-          <div className="development-block">
-            <p className="development-subheading">Upgrade tracks</p>
-            {selectedCountyOwned ? (
-              <ul className="track-upgrade-list">
-                {trackUpgradeOptions.map((track) => (
-                  <li className="track-upgrade-item" key={`track-upgrade-${track.trackType}`}>
-                    <div className="track-upgrade-meta">
-                      <strong>
-                        {track.label} <span className="stats-muted">L{track.level}/{MAX_TRACK_LEVEL}</span>
-                      </strong>
-                      <span>{track.yieldLabel}</span>
-                      <span>{track.populationImpactLabel}</span>
-                      <span>
-                        {track.costLabel} • {track.turnsRequired} turn{track.turnsRequired === 1 ? '' : 's'}
-                      </span>
-                      {!track.canUpgrade && track.disabledReason && (
-                        <span className="upgrade-disabled-reason">{track.disabledReason}</span>
-                      )}
-                    </div>
-                    <button
-                      className="secondary-button queue-remove-button"
-                      disabled={!track.canUpgrade}
-                      onClick={() => onQueueTrackUpgrade(track.trackType)}
-                      type="button"
-                    >
-                      Upgrade +1
-                    </button>
-                  </li>
+              <div className="all-tracks-groups">
+                {groupedTracks.map((group) => (
+                  <section className="track-group" key={`track-group-${group.title}`}>
+                    <h4>{group.title}</h4>
+                    <ul className="upgrade-card-list compact">
+                      {group.tracks.map((track) => renderTrackRow(track))}
+                    </ul>
+                  </section>
                 ))}
-              </ul>
-            ) : (
-              <p className="queue-empty">Only player-owned counties can be developed.</p>
-            )}
-          </div>
-
-          <div className="development-block">
-            <p className="development-subheading">In progress</p>
-            {activeBuildOrder ? (
-              <div className="queue-item">
-                <div>
-                  <strong>{TRACK_LABEL_BY_ID[activeBuildOrder.trackType]}</strong>
-                  <span>{activeBuildOrder.turnsRemaining} turn(s) remaining</span>
-                </div>
               </div>
-            ) : (
-              <p className="queue-empty">No active upgrade in this county.</p>
             )}
-          </div>
 
-          <div className="development-block">
-            <p className="development-subheading">Queued</p>
-            {queuedBuildOrders.length > 0 ? (
-              <ul className="queue-list">
-                {queuedBuildOrders.map((order, queueIndex) => (
-                  <li className="queue-item" key={order.id}>
-                    <div>
-                      <strong>{TRACK_LABEL_BY_ID[order.trackType]}</strong>
-                      <span>{order.turnsRemaining} turn(s)</span>
-                    </div>
-                    <button
-                      className="secondary-button queue-remove-button"
-                      onClick={() => onRemoveQueuedBuildOrder(queueIndex)}
-                      type="button"
-                    >
-                      Remove
-                    </button>
+            <div className="development-block queue-block-compact">
+              <p className="development-subheading">Queued</p>
+              {queuedBuildOrders.length > 0 ? (
+                <ul className="queue-list">
+                  {queuedBuildOrders.map((order, queueIndex) => (
+                    <li className="queue-item" key={order.id}>
+                      <div>
+                        <strong>{TRACK_LABEL_BY_ID[order.trackType]}</strong>
+                        <span>{order.turnsRemaining} turn(s)</span>
+                      </div>
+                      <button
+                        className="secondary-button queue-remove-button"
+                        onClick={() => onRemoveQueuedBuildOrder(queueIndex)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="queue-empty">No queued county upgrades.</p>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="drawer-section development-section premium-section">
+        <button
+          aria-expanded={openSections.economy}
+          className="section-toggle"
+          onClick={() => toggleSection('economy')}
+          type="button"
+        >
+          <span>Economy</span>
+          <span>{openSections.economy ? '−' : '+'}</span>
+        </button>
+
+        {openSections.economy && (
+          <div className="panel-section-body">
+            <div className="development-block queue-block-compact">
+              <p className="development-subheading">Yields per turn</p>
+              {selectedCountyYieldEntries.length > 0 ? (
+                <ul className="county-yield-list">
+                  {selectedCountyYieldEntries.map((entry) => (
+                    <li key={`county-yield-${entry.key}`}>
+                      <span>{entry.label}</span>
+                      <strong>+{entry.amount}</strong>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="queue-empty">No per-turn yields from this county.</p>
+              )}
+            </div>
+
+            <div className="development-block queue-block-compact">
+              <p className="development-subheading">Multipliers</p>
+              <p className="subtle">Workforce efficiency: <strong>{workforceEfficiency}%</strong></p>
+              <p className="subtle">Milestones: bonuses apply at L5/L10/L15/L20 per track.</p>
+            </div>
+
+            <div className="development-block queue-block-compact">
+              <p className="development-subheading">Storage risk</p>
+              {storageRiskEntries.length > 0 ? (
+                <ul className="risk-list">
+                  {storageRiskEntries.map((risk) => (
+                    <li key={`risk-${risk.key}`}>
+                      <span>{RESOURCE_LABEL_BY_KEY[risk.key]}</span>
+                      <strong>{risk.current}/{risk.cap}</strong>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="subtle">No storage pressure right now.</p>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="drawer-section development-section premium-section">
+        <button
+          aria-expanded={openSections.kingdom}
+          className="section-toggle"
+          onClick={() => toggleSection('kingdom')}
+          type="button"
+        >
+          <span>Kingdom</span>
+          <span>{openSections.kingdom ? '−' : '+'}</span>
+        </button>
+
+        {openSections.kingdom && (
+          <div className="panel-section-body">
+            <div className="development-header">
+              <h3>Warehouse</h3>
+              <span className="building-tag">L{warehouseLevel}/{MAX_TRACK_LEVEL}</span>
+            </div>
+
+            <div className="development-block queue-block-compact">
+              <p className="development-subheading">Key caps</p>
+              <ul className="storage-cap-list">
+                {visibleCapEntries.map((entry) => (
+                  <li key={`warehouse-cap-${entry.key}`}>
+                    <span>{entry.label}</span>
+                    <strong>{warehouseCaps[entry.key]}</strong>
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p className="queue-empty">No queued upgrades for this county.</p>
-            )}
+              <button
+                className="secondary-button inline-toggle-button"
+                onClick={() => setShowAllCaps((current) => !current)}
+                type="button"
+              >
+                {showAllCaps ? 'View key caps only' : 'View all caps'}
+              </button>
+            </div>
+
+            <ul className="upgrade-card-list">{renderWarehouseRow()}</ul>
+
+            <div className="development-block queue-block-compact">
+              <p className="development-subheading">Warehouse Queue</p>
+              {warehouseActiveOrder ? (
+                <div className="queue-item">
+                  <div>
+                    <strong>{TRACK_LABEL_BY_ID[warehouseActiveOrder.trackType]}</strong>
+                    <span>{warehouseActiveOrder.turnsRemaining} turn(s) remaining</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="queue-empty">No active warehouse project.</p>
+              )}
+
+              {warehouseQueuedOrders.length > 0 ? (
+                <ul className="queue-list">
+                  {warehouseQueuedOrders.map((order, queueIndex) => (
+                    <li className="queue-item" key={order.id}>
+                      <div>
+                        <strong>{TRACK_LABEL_BY_ID[order.trackType]}</strong>
+                        <span>{order.turnsRemaining} turn(s)</span>
+                      </div>
+                      <button
+                        className="secondary-button queue-remove-button"
+                        onClick={() => onRemoveQueuedWarehouseOrder(queueIndex)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="queue-empty">No queued warehouse upgrades.</p>
+              )}
+            </div>
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
       <section className="drawer-section macro-panel-actions">
         <button className="macro-end-turn-button" onClick={onEndTurn} type="button">

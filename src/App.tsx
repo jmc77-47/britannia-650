@@ -17,7 +17,6 @@ import {
 } from 'topojson-client'
 import {
   MacroPanel,
-  type MacroPanelTab,
   type TrackUpgradeOption,
 } from './components/MacroPanel'
 import { Modal } from './components/Modal'
@@ -410,7 +409,6 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [hoveredCountyId, setHoveredCountyId] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
-  const [activeTab, setActiveTab] = useState<MacroPanelTab>('BUILD')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [setupCharacterId, setSetupCharacterId] = useState<string | null>(
     initialGameState.availableCharacters[0]?.id ?? null,
@@ -744,6 +742,19 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       population: playerPopulationTotals.total,
     }),
     [playerPopulationTotals.total, playerResources],
+  )
+  const storageRiskEntries = useMemo(
+    () =>
+      STORABLE_RESOURCE_KEYS.map((resourceKey) => {
+        const current = displayResources[resourceKey]
+        const cap = storageCaps[resourceKey]
+        return {
+          key: resourceKey,
+          current,
+          cap,
+        }
+      }).filter((entry) => entry.cap > 0 && entry.current / entry.cap >= 0.9),
+    [displayResources, storageCaps],
   )
   const selectedCountyProjectedBuildingLevels = useMemo(() => {
     if (!selectedCountyState) {
@@ -1708,13 +1719,11 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
 
       {gameState.gamePhase === 'playing' && (
         <MacroPanel
-          activeTab={activeTab}
           onEndTurn={handleEndTurn}
           onQueueTrackUpgrade={queueTrackUpgradeForSelectedCounty}
           onQueueWarehouseUpgrade={queueWarehouseUpgrade}
           onRemoveQueuedBuildOrder={removeQueuedOrderForSelectedCounty}
           onRemoveQueuedWarehouseOrder={removeQueuedWarehouseOrder}
-          onTabChange={setActiveTab}
           activeBuildOrder={selectedCountyActiveOrder}
           queuedBuildOrders={selectedCountyQueuedOrders}
           warehouseActiveOrder={warehouseActiveOrder}
@@ -1739,6 +1748,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           selectedCountyRoadLevel={selectedCountyState?.roadLevel ?? 0}
           trackUpgradeOptions={selectedCountyTrackUpgrades}
           selectedCountyYields={selectedCountyYields}
+          storageRiskEntries={storageRiskEntries}
           selectedCountyOwned={selectedCountyOwned}
           selectedCounty={selectedCountyForPanel}
           turnNumber={gameState.turnNumber}

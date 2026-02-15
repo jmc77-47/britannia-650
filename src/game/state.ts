@@ -147,9 +147,9 @@ const fetchJson = async <T>(path: string): Promise<T> => {
 }
 
 export const createStartingResources = (): ResourceStockpile => ({
-  gold: 350,
+  gold: 500,
   population: 0,
-  wood: 180,
+  wood: 260,
   stone: 60,
   iron: 20,
   wool: 25,

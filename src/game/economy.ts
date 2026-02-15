@@ -45,7 +45,8 @@ export interface StorageClampResult {
 }
 
 const BASE_PLAYER_COUNTY_YIELD: ResourceDelta = {
-  gold: 1,
+  gold: 8,
+  wood: 6,
 }
 
 const RESOURCE_LABELS: Record<ResourceKey, string> = {
@@ -158,7 +159,7 @@ const getCountyYieldBreakdown = (
   let totalDelta: ResourceDelta = { ...BASE_PLAYER_COUNTY_YIELD }
   const countyLabel = `${countyState.name} (${countyId})`
   const contributionLines: string[] = [
-    `${countyLabel}: +1 Gold (County base yield)`,
+    `${countyLabel}: +8 Gold, +6 Wood (County base income)`,
   ]
 
   let populationDeltaForCounty = 0

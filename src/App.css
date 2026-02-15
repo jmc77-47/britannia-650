@@ -1399,6 +1399,226 @@ button:disabled {
   font-size: 0.74rem;
 }
 
+.premium-section {
+  gap: 0.55rem;
+}
+
+.section-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.56rem;
+  border-radius: 10px;
+  border: 1px solid rgba(236, 220, 181, 0.24);
+  background: linear-gradient(180deg, rgba(62, 81, 92, 0.34), rgba(26, 36, 42, 0.36));
+  font-size: 0.83rem;
+}
+
+.panel-section-body {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.overview-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.38rem 0.56rem;
+}
+
+.overview-grid div {
+  border: 1px solid rgba(238, 220, 188, 0.14);
+  border-radius: 8px;
+  padding: 0.34rem 0.4rem;
+  background: rgba(13, 21, 26, 0.44);
+}
+
+.overview-grid dt {
+  color: #c9c0a6;
+  font-size: 0.72rem;
+  margin: 0;
+}
+
+.overview-grid dd {
+  margin: 0.14rem 0 0;
+  color: #f2e7c6;
+  font-size: 0.84rem;
+}
+
+.overview-inline-note {
+  margin: 0;
+  padding: 0.4rem 0.45rem;
+  border: 1px solid rgba(237, 220, 181, 0.16);
+  border-radius: 8px;
+  background: rgba(18, 28, 33, 0.44);
+  color: #ddd3b8;
+  font-size: 0.79rem;
+  line-height: 1.35;
+}
+
+.overview-hint {
+  font-size: 0.76rem;
+}
+
+.build-tab-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.build-tab-button {
+  min-width: 6.2rem;
+  padding: 0.36rem 0.56rem;
+  font-size: 0.76rem;
+}
+
+.build-tab-button.is-active {
+  border-color: rgba(244, 228, 189, 0.62);
+  background: linear-gradient(180deg, #7f6332, #62481f);
+  color: #fff6db;
+}
+
+.upgrade-card-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.44rem;
+}
+
+.upgrade-card-list.compact .upgrade-card {
+  padding: 0.42rem 0.46rem;
+}
+
+.upgrade-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.56rem;
+  align-items: center;
+  border: 1px solid rgba(238, 220, 180, 0.19);
+  border-radius: 10px;
+  background: rgba(194, 145, 70, 0.08);
+  padding: 0.5rem 0.54rem;
+}
+
+.upgrade-card-main {
+  min-width: 0;
+  display: flex;
+  gap: 0.48rem;
+  align-items: flex-start;
+}
+
+.upgrade-card-icon {
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(242, 224, 184, 0.22);
+  background: rgba(20, 31, 37, 0.46);
+  font-size: 0.86rem;
+  flex: 0 0 auto;
+}
+
+.upgrade-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.12rem;
+}
+
+.upgrade-card-title {
+  margin: 0;
+  color: #f2e8c8;
+  font-size: 0.82rem;
+}
+
+.upgrade-card-reason {
+  margin: 0;
+  color: #f0d69b;
+  font-size: 0.74rem;
+}
+
+.upgrade-card-subtle {
+  margin: 0;
+  color: #cec2a0;
+  font-size: 0.74rem;
+}
+
+.upgrade-card-actions {
+  display: grid;
+  gap: 0.34rem;
+  justify-items: end;
+}
+
+.upgrade-card-chips {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.24rem;
+}
+
+.upgrade-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(225, 208, 170, 0.28);
+  border-radius: 999px;
+  padding: 0.09rem 0.38rem;
+  background: rgba(12, 20, 24, 0.52);
+  color: #e9ddb9;
+  font-size: 0.69rem;
+  line-height: 1.2;
+}
+
+.upgrade-chip.is-turns {
+  border-color: rgba(180, 211, 222, 0.34);
+  color: #cde1e9;
+  background: rgba(14, 28, 33, 0.6);
+}
+
+.all-tracks-groups {
+  display: grid;
+  gap: 0.56rem;
+}
+
+.track-group h4 {
+  margin: 0 0 0.36rem;
+  color: #e6d7b1;
+  font-size: 0.77rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.queue-block-compact {
+  padding: 0.5rem;
+}
+
+.risk-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.26rem;
+}
+
+.risk-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.56rem;
+  font-size: 0.8rem;
+}
+
+.risk-list strong {
+  color: #f3d6a0;
+}
+
+.inline-toggle-button {
+  margin-top: 0.44rem;
+  padding: 0.28rem 0.46rem;
+  font-size: 0.74rem;
+}
+
 .county-yield-list {
   margin: 0;
   padding: 0;
