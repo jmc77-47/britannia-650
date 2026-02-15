@@ -264,6 +264,85 @@
   backdrop-filter: blur(7px);
 }
 
+.MacroBanner {
+  position: fixed;
+  left: 1rem;
+  top: 1rem;
+  z-index: 30;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: 0.78rem 0.88rem;
+  animation: hud-fade-up 320ms ease;
+}
+
+.MacroBanner h1 {
+  margin: 0.14rem 0 0.28rem;
+  font-size: clamp(1.28rem, 2.5vw, 1.8rem);
+}
+
+.MacroPanel {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 34;
+  width: min(24rem, calc(100vw - 2rem));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.75rem;
+  animation: hud-slide-left 420ms ease;
+}
+
+.macro-panel-header h2 {
+  margin-bottom: 0.45rem;
+}
+
+.macro-panel-turn,
+.macro-panel-selection {
+  margin: 0;
+  color: #dfd5b8;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.macro-panel-selection {
+  margin-top: 0.24rem;
+}
+
+.macro-tab-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.42rem;
+}
+
+.macro-tab-button {
+  padding: 0.48rem 0.58rem;
+  font-size: 0.82rem;
+}
+
+.macro-tab-button.is-active {
+  border-color: rgba(244, 228, 189, 0.62);
+  background: linear-gradient(180deg, #7f6332, #62481f);
+  color: #fff6db;
+}
+
+.macro-tab-body {
+  margin-top: 0.6rem;
+  padding: 0.58rem 0.6rem;
+  border-radius: 10px;
+  border: 1px solid rgba(241, 225, 189, 0.16);
+  background: rgba(15, 24, 27, 0.54);
+}
+
+.macro-panel-actions {
+  margin-top: auto;
+}
+
+.macro-end-turn-button {
+  width: 100%;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 .HudTopBar {
   position: fixed;
   top: 0;
@@ -1276,6 +1355,20 @@ button:disabled {
 }
 
 @media (max-width: 900px) {
+  .MacroBanner {
+    right: 0.75rem;
+    width: auto;
+  }
+
+  .MacroPanel {
+    left: 0.75rem;
+    right: 0.75rem;
+    top: auto;
+    bottom: 0.75rem;
+    max-height: min(46vh, 28rem);
+    width: auto;
+  }
+
   .HudTopBar {
     left: 0;
     right: 0;
