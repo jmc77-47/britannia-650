@@ -48,7 +48,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionId: null,
       playerFactionName: null,
       playerFactionColor: null,
-      playerFactionCountyIds: [],
+      ownedCountyIds: [],
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
       discoveredCountyIds: [],
@@ -68,7 +68,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     const kingdom = state.kingdoms.find((candidateKingdom) =>
       candidateKingdom.countyIds.includes(startingCountyId),
     )
-    const playerFactionCountyIds = kingdom
+    const ownedCountyIds = kingdom
       ? kingdom.countyIds
       : startingCountyId
         ? [startingCountyId]
@@ -90,7 +90,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionId: kingdom?.id ?? null,
       playerFactionName: kingdom?.name ?? `${selectedCharacter.name}'s Realm`,
       playerFactionColor: kingdom?.color ?? '#f3c94b',
-      playerFactionCountyIds,
+      ownedCountyIds,
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
       discoveredCountyIds,
@@ -99,16 +99,9 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
   }
 
   if (action.type === 'TOGGLE_FOG_OF_WAR') {
-    const nextFogState = !state.fogOfWarEnabled
-    const shouldClearSelection =
-      nextFogState &&
-      state.selectedCountyId !== null &&
-      !state.discoveredCountyIds.includes(state.selectedCountyId)
-
     return {
       ...state,
-      fogOfWarEnabled: nextFogState,
-      selectedCountyId: shouldClearSelection ? null : state.selectedCountyId,
+      fogOfWarEnabled: !state.fogOfWarEnabled,
     }
   }
 
@@ -130,9 +123,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
         ...state,
         selectedCountyId: null,
       }
-    }
-    if (state.fogOfWarEnabled && !state.discoveredCountyIds.includes(countyId)) {
-      return state
     }
 
     return {

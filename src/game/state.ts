@@ -32,7 +32,7 @@ export interface GameState {
   playerFactionId: string | null
   playerFactionName: string | null
   playerFactionColor: string | null
-  playerFactionCountyIds: string[]
+  ownedCountyIds: string[]
   fogOfWarEnabled: boolean
   superhighwaysEnabled: boolean
   discoveredCountyIds: string[]
@@ -249,7 +249,7 @@ export const createInitialGameState = async (): Promise<GameState> => {
     playerFactionId: null,
     playerFactionName: null,
     playerFactionColor: null,
-    playerFactionCountyIds: [],
+    ownedCountyIds: [],
     fogOfWarEnabled: true,
     superhighwaysEnabled: false,
     discoveredCountyIds: [],

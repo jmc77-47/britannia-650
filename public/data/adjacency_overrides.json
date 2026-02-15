@@ -1,0 +1,10 @@
+{
+  "edges": [
+    ["CRN", "AGL"],
+    ["BTE", "AYS"],
+    ["BTE", "ARG"],
+    ["ORN", "CTN"],
+    ["ORN", "SHT"],
+    ["STL", "CLM"]
+  ]
+}

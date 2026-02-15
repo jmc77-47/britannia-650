@@ -10,7 +10,11 @@ import {
   useState,
 } from 'react'
 import { geoMercator, geoPath } from 'd3-geo'
-import { feature as topoFeature, mesh as topoMesh } from 'topojson-client'
+import {
+  feature as topoFeature,
+  mesh as topoMesh,
+  neighbors as topoNeighbors,
+} from 'topojson-client'
 import { MacroPanel, type MacroPanelTab } from './components/MacroPanel'
 import { Modal } from './components/Modal'
 import { gameReducer } from './game/reducer'
@@ -26,6 +30,7 @@ import {
 import './App.css'
 
 const TOPOLOGY_PATH = 'data/counties_gb_s05.topo.json'
+const ADJACENCY_OVERRIDES_PATH = 'data/adjacency_overrides.json'
 const MIN_ZOOM = 1
 const MAX_ZOOM = 6
 const MAP_PADDING = 26
@@ -55,6 +60,10 @@ interface TopologyObject {
 interface TopologyData {
   type: 'Topology'
   objects: Record<string, TopologyObject>
+}
+
+interface AdjacencyOverridesPayload {
+  edges?: unknown
 }
 
 interface CountyFeature {
@@ -134,67 +143,100 @@ const getCountyPairKey = (countyAId: string, countyBId: string): string =>
     ? `${countyAId}|${countyBId}`
     : `${countyBId}|${countyAId}`
 
-const collectArcIndices = (value: unknown, output: number[]) => {
-  if (!Array.isArray(value)) {
-    return
-  }
-
-  if (value.length > 0 && typeof value[0] === 'number') {
-    for (const arcIndex of value) {
-      if (typeof arcIndex === 'number') {
-        output.push(arcIndex >= 0 ? arcIndex : ~arcIndex)
-      }
-    }
-    return
-  }
-
-  for (const child of value) {
-    collectArcIndices(child, output)
-  }
-}
-
 const buildCountyAdjacency = (
   object: TopologyObject,
 ): Record<string, string[]> => {
-  const arcOwners = new Map<number, Set<string>>()
+  const geometries = object.geometries ?? []
+  // Keep neighbor indices aligned to the exact geometry list passed to topoNeighbors.
+  const countyIdByGeometryIndex = geometries.map((geometry) =>
+    getCountyId(geometry.properties),
+  )
+  const neighborIndices = topoNeighbors(geometries as unknown[])
 
-  for (const geometry of object.geometries ?? []) {
-    const countyId = getCountyId(geometry.properties)
+  const adjacency: Record<string, string[]> = {}
+  countyIdByGeometryIndex.forEach((countyId, countyIndex) => {
     if (!countyId) {
-      continue
+      return
     }
 
-    const arcIndices: number[] = []
-    collectArcIndices(geometry.arcs, arcIndices)
-    const uniqueArcIndices = new Set(arcIndices)
-    uniqueArcIndices.forEach((arcIndex) => {
-      const owners = arcOwners.get(arcIndex) ?? new Set<string>()
-      owners.add(countyId)
-      arcOwners.set(arcIndex, owners)
-    })
+    const neighborIds = (neighborIndices[countyIndex] ?? [])
+      .map((neighborIndex) => countyIdByGeometryIndex[neighborIndex] ?? '')
+      .filter(
+        (neighborCountyId): neighborCountyId is string =>
+          neighborCountyId.length > 0 && neighborCountyId !== countyId,
+      )
+
+    adjacency[countyId] = [...new Set(neighborIds)].sort()
+  })
+
+  return adjacency
+}
+
+const parseAdjacencyOverrideEdges = (payload: unknown): [string, string][] => {
+  if (!payload || typeof payload !== 'object') {
+    return []
   }
 
-  const adjacency = new Map<string, Set<string>>()
-  arcOwners.forEach((owners) => {
-    const ownerIds = [...owners]
-    for (let i = 0; i < ownerIds.length; i += 1) {
-      const source = ownerIds[i]
-      const linked = adjacency.get(source) ?? new Set<string>()
-      for (let j = 0; j < ownerIds.length; j += 1) {
-        if (i !== j) {
-          linked.add(ownerIds[j])
-        }
-      }
-      adjacency.set(source, linked)
+  const rawEdges = (payload as AdjacencyOverridesPayload).edges
+  if (!Array.isArray(rawEdges)) {
+    return []
+  }
+
+  const overrideEdges: [string, string][] = []
+  rawEdges.forEach((rawEdge) => {
+    if (!Array.isArray(rawEdge) || rawEdge.length < 2) {
+      return
     }
+
+    const countyAId = normalizeCountyId(
+      typeof rawEdge[0] === 'string' ? rawEdge[0] : '',
+    )
+    const countyBId = normalizeCountyId(
+      typeof rawEdge[1] === 'string' ? rawEdge[1] : '',
+    )
+    if (!countyAId || !countyBId || countyAId === countyBId) {
+      return
+    }
+
+    overrideEdges.push([countyAId, countyBId])
   })
 
-  const result: Record<string, string[]> = {}
-  adjacency.forEach((neighbors, countyId) => {
-    result[countyId] = [...neighbors].sort()
+  return overrideEdges
+}
+
+const mergeAdjacencyOverrides = (
+  baseAdjacency: Record<string, string[]>,
+  overrideEdges: [string, string][],
+): Record<string, string[]> => {
+  const merged = new Map<string, Set<string>>()
+
+  Object.entries(baseAdjacency).forEach(([countyId, neighbors]) => {
+    const neighborSet = merged.get(countyId) ?? new Set<string>()
+    neighbors.forEach((neighborId) => {
+      const normalizedNeighborId = normalizeCountyId(neighborId)
+      if (normalizedNeighborId && normalizedNeighborId !== countyId) {
+        neighborSet.add(normalizedNeighborId)
+      }
+    })
+    merged.set(countyId, neighborSet)
   })
 
-  return result
+  overrideEdges.forEach(([countyAId, countyBId]) => {
+    const neighborsA = merged.get(countyAId) ?? new Set<string>()
+    neighborsA.add(countyBId)
+    merged.set(countyAId, neighborsA)
+
+    const neighborsB = merged.get(countyBId) ?? new Set<string>()
+    neighborsB.add(countyAId)
+    merged.set(countyBId, neighborsB)
+  })
+
+  const adjacency: Record<string, string[]> = {}
+  merged.forEach((neighbors, countyId) => {
+    adjacency[countyId] = [...neighbors].sort()
+  })
+
+  return adjacency
 }
 
 const getErrorMessage = (error: unknown): string => {
@@ -241,13 +283,16 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
 
   const isSetupPhase = gameState.gamePhase === 'setup'
   const isFogActive = gameState.gamePhase === 'playing' && gameState.fogOfWarEnabled
-  const discoveredCountyIdSet = useMemo(
-    () => new Set(gameState.discoveredCountyIds),
-    [gameState.discoveredCountyIds],
+  const ownedCountyIdSet = useMemo(
+    () => new Set(gameState.ownedCountyIds.map((countyId) => normalizeCountyId(countyId))),
+    [gameState.ownedCountyIds],
   )
-  const playerFactionCountyIdSet = useMemo(
-    () => new Set(gameState.playerFactionCountyIds),
-    [gameState.playerFactionCountyIds],
+  const discoveredCountyIdSet = useMemo(
+    () =>
+      new Set(
+        gameState.discoveredCountyIds.map((countyId) => normalizeCountyId(countyId)),
+      ),
+    [gameState.discoveredCountyIds],
   )
 
   useEffect(() => {
@@ -391,12 +436,44 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     viewport.width,
   ])
 
-  const discoveredCountiesForMask = useMemo(
+  const allCountyIdSet = useMemo(
+    () => new Set(projectedMap.counties.map((county) => county.id)),
+    [projectedMap.counties],
+  )
+
+  const visibleCountyIdSet = useMemo(() => {
+    if (!isFogActive) {
+      return allCountyIdSet
+    }
+
+    const visibleCountyIds = new Set<string>()
+    discoveredCountyIdSet.forEach((countyId) => visibleCountyIds.add(countyId))
+    ownedCountyIdSet.forEach((countyId) => {
+      visibleCountyIds.add(countyId)
+      const neighbors = mapData.countyNeighborIdsByCounty[countyId] ?? []
+      neighbors.forEach((neighborId) => {
+        const normalizedNeighborId = normalizeCountyId(neighborId)
+        if (normalizedNeighborId) {
+          visibleCountyIds.add(normalizedNeighborId)
+        }
+      })
+    })
+
+    return visibleCountyIds
+  }, [
+    allCountyIdSet,
+    discoveredCountyIdSet,
+    isFogActive,
+    mapData.countyNeighborIdsByCounty,
+    ownedCountyIdSet,
+  ])
+
+  const visibleCountiesForMask = useMemo(
     () =>
       projectedMap.counties.filter((county) =>
-        discoveredCountyIdSet.has(county.id),
+        visibleCountyIdSet.has(county.id),
       ),
-    [discoveredCountyIdSet, projectedMap.counties],
+    [projectedMap.counties, visibleCountyIdSet],
   )
 
   const fogBounds = useMemo(
@@ -499,15 +576,15 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     }
   }, [tooltip, viewport.height, viewport.width])
 
-  const isCountyDiscovered = useCallback(
+  const isCountyVisible = useCallback(
     (countyId: string) =>
-      !isFogActive || discoveredCountyIdSet.has(normalizeCountyId(countyId)),
-    [discoveredCountyIdSet, isFogActive],
+      !isFogActive || visibleCountyIdSet.has(normalizeCountyId(countyId)),
+    [isFogActive, visibleCountyIdSet],
   )
 
   const getCountyFill = useCallback(
     (county: CountyDrawModel): string => {
-      if (!isCountyDiscovered(county.id)) {
+      if (!isCountyVisible(county.id)) {
         return FOGGED_COUNTY_FILL
       }
 
@@ -516,7 +593,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       }
       if (
         gameState.gamePhase === 'playing' &&
-        playerFactionCountyIdSet.has(county.id)
+        ownedCountyIdSet.has(county.id)
       ) {
         return gameState.playerFactionColor ?? PLAYER_FACTION_FALLBACK_FILL
       }
@@ -530,8 +607,8 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       gameState.playerFactionColor,
       gameState.selectedCountyId,
       hoveredCountyId,
-      isCountyDiscovered,
-      playerFactionCountyIdSet,
+      isCountyVisible,
+      ownedCountyIdSet,
     ],
   )
 
@@ -540,7 +617,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       if (isDragging || isSetupPhase || settingsOpen) {
         return
       }
-      if (!isCountyDiscovered(countyId)) {
+      if (!isCountyVisible(countyId)) {
         setHoveredCountyId(null)
         setTooltip(null)
         return
@@ -558,7 +635,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         y: clientY - hostRect.top,
       })
     },
-    [isCountyDiscovered, isDragging, isSetupPhase, settingsOpen],
+    [isCountyVisible, isDragging, isSetupPhase, settingsOpen],
   )
 
   const closeTooltip = useCallback(() => {
@@ -571,6 +648,20 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       closeTooltip()
     }
   }, [closeTooltip, isSetupPhase, settingsOpen])
+
+  useEffect(() => {
+    if (!gameState.selectedCountyId) {
+      return
+    }
+    if (isCountyVisible(gameState.selectedCountyId)) {
+      return
+    }
+
+    dispatch({
+      type: 'SELECT_COUNTY',
+      countyId: null,
+    })
+  }, [gameState.selectedCountyId, isCountyVisible])
 
   const zoomByWheel = useCallback(
     (deltaY: number, clientX: number, clientY: number) => {
@@ -693,7 +784,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       if (isSetupPhase || settingsOpen || dragMovedRef.current) {
         return
       }
-      if (!isCountyDiscovered(countyId)) {
+      if (!isCountyVisible(countyId)) {
         return
       }
 
@@ -702,7 +793,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         countyId,
       })
     },
-    [isCountyDiscovered, isSetupPhase, settingsOpen],
+    [isCountyVisible, isSetupPhase, settingsOpen],
   )
 
   const countyRoadEdges = useMemo<CountyRoadEdge[]>(() => {
@@ -737,10 +828,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     const roads: RoadRenderModel[] = []
 
     countyRoadEdges.forEach((edge) => {
-      if (
-        isFogActive &&
-        (!isCountyDiscovered(edge.countyAId) || !isCountyDiscovered(edge.countyBId))
-      ) {
+      if (!isCountyVisible(edge.countyAId) || !isCountyVisible(edge.countyBId)) {
         return
       }
 
@@ -779,8 +867,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     countyRoadEdges,
     gameState.counties,
     gameState.superhighwaysEnabled,
-    isCountyDiscovered,
-    isFogActive,
+    isCountyVisible,
     isSetupPhase,
     projectedMap.counties,
   ])
@@ -920,12 +1007,12 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
                   y={fogBounds.y}
                 />
                 <g filter={`url(#${fogRevealFilterId})`}>
-                  {discoveredCountiesForMask.map((county) => (
+                  {visibleCountiesForMask.map((county) => (
                     <path d={county.d} fill="black" key={`fog-visible-${county.id}`} />
                   ))}
                 </g>
                 <g filter={`url(#${fogRevealHaloFilterId})`}>
-                  {discoveredCountiesForMask.map((county) => (
+                  {visibleCountiesForMask.map((county) => (
                     <path
                       d={county.d}
                       fill="none"
@@ -944,8 +1031,8 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.scale})`}>
             <g className="county-layer">
               {projectedMap.counties.map((county) => {
-                const isPlayerCounty = playerFactionCountyIdSet.has(county.id)
-                const countyDiscovered = isCountyDiscovered(county.id)
+                const isPlayerCounty = ownedCountyIdSet.has(county.id)
+                const countyVisible = isCountyVisible(county.id)
                 return (
                   <path
                     className={`county-fill${hoveredCountyId === county.id ? ' is-hovered' : ''}${
@@ -962,7 +1049,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
                     onMouseMove={(event) =>
                       updateTooltip(county.id, event.clientX, event.clientY)
                     }
-                    pointerEvents={countyDiscovered ? 'auto' : 'none'}
+                    pointerEvents={countyVisible ? 'auto' : 'none'}
                   />
                 )
               })}
@@ -973,8 +1060,8 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
                 {projectedMap.counties
                   .filter(
                     (county) =>
-                      playerFactionCountyIdSet.has(county.id) &&
-                      isCountyDiscovered(county.id),
+                      ownedCountyIdSet.has(county.id) &&
+                      isCountyVisible(county.id),
                   )
                   .map((county) => (
                     <g key={`player-county-${county.id}`}>
@@ -1235,9 +1322,11 @@ function App() {
 
       try {
         const toAssetUrl = assetUrl(import.meta.env.BASE_URL)
-        const [topologyData, initialState] = await Promise.all([
+        const [topologyData, initialState, adjacencyOverridesPayload] =
+          await Promise.all([
           fetchJson<TopologyData>(toAssetUrl(TOPOLOGY_PATH)),
           createInitialGameState(),
+          fetchJson<unknown>(toAssetUrl(ADJACENCY_OVERRIDES_PATH)),
         ])
 
         const objectName = Object.keys(topologyData.objects)[0]
@@ -1246,7 +1335,10 @@ function App() {
         }
 
         const topologyObject = topologyData.objects[objectName]
-        const countyNeighborIdsByCounty = buildCountyAdjacency(topologyObject)
+        const countyNeighborIdsByCounty = mergeAdjacencyOverrides(
+          buildCountyAdjacency(topologyObject),
+          parseAdjacencyOverrideEdges(adjacencyOverridesPayload),
+        )
         const countyFeatures = topoFeature(
           topologyData,
           topologyObject,
