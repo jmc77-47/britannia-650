@@ -636,15 +636,27 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   )
 
   const selectedCountyForPanel = useMemo(() => {
-    if (!selectedCounty) {
+    if (selectedCounty) {
+      return {
+        id: selectedCounty.id,
+        name: selectedCounty.name,
+      }
+    }
+
+    const fallbackCountyId = gameState.selectedCountyId
+    if (!fallbackCountyId) {
+      return null
+    }
+    const fallbackCountyState = gameState.counties[fallbackCountyId]
+    if (!fallbackCountyState) {
       return null
     }
 
     return {
-      id: selectedCounty.id,
-      name: selectedCounty.name,
+      id: fallbackCountyState.id,
+      name: fallbackCountyState.name,
     }
-  }, [selectedCounty])
+  }, [gameState.counties, gameState.selectedCountyId, selectedCounty])
   const selectedCountyState = useMemo(
     () =>
       selectedCountyForPanel

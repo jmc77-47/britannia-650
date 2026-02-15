@@ -332,7 +332,7 @@ export const createInitialGameState = async (): Promise<GameState> => {
     resourcesByKingdomId,
     buildQueueByCountyId: {},
     globalBuildQueue: createEmptyCountyBuildQueue(),
-    warehouseLevel: 0,
+    warehouseLevel: 1,
     lastTurnReport: null,
     fogOfWarEnabled: true,
     superhighwaysEnabled: false,

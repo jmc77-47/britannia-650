@@ -565,15 +565,16 @@ export const getTrackUpgradeCost = (
 export const getStorageCapsForWarehouseLevel = (
   warehouseLevel: number,
 ): StorageCaps => {
-  const level = clampWarehouseLevel(warehouseLevel)
+  const level = Math.max(1, clampWarehouseLevel(warehouseLevel))
+  const growthLevels = level - 1
   return {
-    gold: WAREHOUSE_CAP_BASE.gold + WAREHOUSE_CAP_PER_LEVEL.gold * level,
-    wood: WAREHOUSE_CAP_BASE.wood + WAREHOUSE_CAP_PER_LEVEL.wood * level,
-    stone: WAREHOUSE_CAP_BASE.stone + WAREHOUSE_CAP_PER_LEVEL.stone * level,
-    iron: WAREHOUSE_CAP_BASE.iron + WAREHOUSE_CAP_PER_LEVEL.iron * level,
-    wool: WAREHOUSE_CAP_BASE.wool + WAREHOUSE_CAP_PER_LEVEL.wool * level,
-    leather: WAREHOUSE_CAP_BASE.leather + WAREHOUSE_CAP_PER_LEVEL.leather * level,
-    horses: WAREHOUSE_CAP_BASE.horses + WAREHOUSE_CAP_PER_LEVEL.horses * level,
+    gold: WAREHOUSE_CAP_BASE.gold + WAREHOUSE_CAP_PER_LEVEL.gold * growthLevels,
+    wood: WAREHOUSE_CAP_BASE.wood + WAREHOUSE_CAP_PER_LEVEL.wood * growthLevels,
+    stone: WAREHOUSE_CAP_BASE.stone + WAREHOUSE_CAP_PER_LEVEL.stone * growthLevels,
+    iron: WAREHOUSE_CAP_BASE.iron + WAREHOUSE_CAP_PER_LEVEL.iron * growthLevels,
+    wool: WAREHOUSE_CAP_BASE.wool + WAREHOUSE_CAP_PER_LEVEL.wool * growthLevels,
+    leather: WAREHOUSE_CAP_BASE.leather + WAREHOUSE_CAP_PER_LEVEL.leather * growthLevels,
+    horses: WAREHOUSE_CAP_BASE.horses + WAREHOUSE_CAP_PER_LEVEL.horses * growthLevels,
   }
 }
 
