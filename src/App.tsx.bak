@@ -1,6 +1,3 @@
-import FactionSelectScreen from './ui/screens/FactionSelectScreen'
-import { getLeader, type LeaderId } from './data/leaders'
-import { TutorialModal } from './ui/tutorial/TutorialModal'
 import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
@@ -64,7 +61,6 @@ import {
   getCountyYields,
   getPlayerPopulationTotals,
 } from './game/economy'
-import { getDisplayYear } from './game/time'
 import {
   CanvasRoadLayer,
   type RoadRenderModel,
@@ -196,8 +192,6 @@ interface SetupCharacterCard {
 interface MacroGameProps {
   initialGameState: GameState
   mapData: LoadedMapData
-  selectedLeaderId: LeaderId
-  onRequestNewGame: () => void
 }
 
 const clamp = (value: number, min: number, max: number): number =>
@@ -449,12 +443,7 @@ const isTypingTarget = (eventTarget: EventTarget | null): boolean => {
   )
 }
 
-function MacroGame({
-  initialGameState,
-  mapData,
-  selectedLeaderId,
-  onRequestNewGame,
-}: MacroGameProps) {
+function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const mapViewportRef = useRef<HTMLDivElement | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
   const dragMovedRef = useRef(false)
@@ -469,7 +458,6 @@ function MacroGame({
   const [hoveredCountyId, setHoveredCountyId] = useState<string | null>(null)
   const [tooltip, setTooltip] = useState<TooltipState | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [leaderCardLoadError, setLeaderCardLoadError] = useState(false)
   const [lastSelectedOwnedCountyId, setLastSelectedOwnedCountyId] = useState<string | null>(
     null,
   )
@@ -482,16 +470,6 @@ function MacroGame({
   const fogRevealHaloFilterId = `${fogIdBase}-reveal-halo`
   const fogTextureFilterId = `${fogIdBase}-texture`
   const settingsTitleId = `${fogIdBase}-settings-title`
-  const toAssetUrl = useMemo(() => assetUrl(import.meta.env.BASE_URL), [])
-  const selectedLeader = useMemo(() => getLeader(selectedLeaderId), [selectedLeaderId])
-  const displayYear = useMemo(
-    () => getDisplayYear(gameState.turnNumber),
-    [gameState.turnNumber],
-  )
-
-  useEffect(() => {
-    setLeaderCardLoadError(false)
-  }, [selectedLeaderId])
 
   const isSetupPhase = gameState.gamePhase === 'setup'
   const isFogActive = gameState.gamePhase === 'playing' && gameState.fogOfWarEnabled
@@ -789,6 +767,15 @@ function MacroGame({
         ? 20
         : selectedCountyState?.roadLevel ?? 0,
     [gameState.superhighwaysEnabled, selectedCountyState],
+  )
+  const selectedCharacter = useMemo(
+    () =>
+      gameState.selectedCharacterId
+        ? gameState.availableCharacters.find(
+            (character) => character.id === gameState.selectedCharacterId,
+          ) ?? null
+        : null,
+    [gameState.availableCharacters, gameState.selectedCharacterId],
   )
   const playerResources = useMemo<ResourceStockpile>(() => {
     if (!playerFactionId) {
@@ -1784,8 +1771,9 @@ function MacroGame({
   }, [computeInitialDiscoveredCountyIds, gameState.availableCharacters, setupCharacterId])
 
   const openSetup = useCallback(() => {
-    onRequestNewGame()
-  }, [onRequestNewGame])
+    setSetupCharacterId(gameState.availableCharacters[0]?.id ?? null)
+    dispatch({ type: 'OPEN_SETUP' })
+  }, [gameState.availableCharacters])
 
   const queueClaimForSelectedCounty = useCallback(() => {
     if (!selectedCountyForPanel || !selectedCountySourceId) {
@@ -2175,34 +2163,11 @@ function MacroGame({
       ) : (
         <header aria-label="Top resource ribbon" className="HudPanel MacroRibbon">
           <div className="macro-ribbon-main">
-            <div className="macro-ribbon-leader">
-              <div className="macro-ribbon-leader-card" aria-hidden="true">
-                {!leaderCardLoadError ? (
-                  <img
-                    alt=""
-                    className="macro-ribbon-leader-card-image"
-                    onError={() => setLeaderCardLoadError(true)}
-                    src={toAssetUrl(selectedLeader.cardArtPath)}
-                  />
-                ) : (
-                  <div className="macro-ribbon-leader-card-fallback" />
-                )}
-              </div>
-              <div className="macro-ribbon-leader-copy">
-                <p className="hud-eyebrow">Campaign Chronicle</p>
-                <p className="macro-ribbon-leader-name">
-                  {selectedLeader.name} {selectedLeader.epithet}
-                </p>
-                <p className="macro-ribbon-leader-faction subtle">
-                  {selectedLeader.faction}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="macro-ribbon-year" title="Current campaign year">
-            <span className="resource-pill-label">Year</span>
-            <strong>{displayYear} AD</strong>
+            <p className="hud-eyebrow">Dark Ages 650 AD</p>
+            <p className="macro-ribbon-context subtle">
+              Character: <strong>{selectedCharacter?.name ?? 'Unknown'}</strong> | Faction:{' '}
+              <strong>{gameState.playerFactionName ?? 'Unknown banner'}</strong>
+            </p>
           </div>
 
           <ul aria-label="Current resources" className="resource-ribbon">
@@ -2449,16 +2414,9 @@ function App() {
   const [mapData, setMapData] = useState<LoadedMapData | null>(null)
   const [initialGameState, setInitialGameState] = useState<GameState | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [selectedLeaderId, setSelectedLeaderId] = useState<LeaderId>('alphonsus')
-  const [hasConfirmedLeader, setHasConfirmedLeader] = useState(false)
-  const [tutorialComplete, setTutorialComplete] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    if (!hasConfirmedLeader) {
-      return
-    }
-
     let cancelled = false
 
     const loadData = async () => {
@@ -2475,7 +2433,7 @@ function App() {
         ] =
           await Promise.all([
           fetchJson<TopologyData>(toAssetUrl(TOPOLOGY_PATH)),
-          createInitialGameState({ selectedLeaderId }),
+          createInitialGameState(),
           fetchJson<unknown>(toAssetUrl(ADJACENCY_OVERRIDES_PATH)),
           fetchJson<unknown>(toAssetUrl(DEEPWATER_PORTS_PATH)),
         ])
@@ -2527,69 +2485,33 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [hasConfirmedLeader, selectedLeaderId])
+  }, [])
 
-  if (!hasConfirmedLeader) {
-    return (
-      <FactionSelectScreen
-        initialSelectedId={selectedLeaderId}
-        onConfirm={(leaderId) => {
-          setSelectedLeaderId(leaderId)
-          setMapData(null)
-          setInitialGameState(null)
-          setErrorMessage(null)
-          setTutorialComplete(false)
-          setHasConfirmedLeader(true)
-        }}
-      />
-    )
-  }
-
-  if (errorMessage) {
-    return (
-      <div className="MacroRoot">
-        <div className="MapCanvas">
-          <div className="status-panel error-panel" role="alert">
-            <p>{errorMessage}</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (isLoading || !mapData || !initialGameState || !tutorialComplete) {
+  if (isLoading) {
     return (
       <div className="MacroRoot">
         <div className="MapCanvas">
           <div className="status-panel" role="status">
-            <p>
-              {isLoading || !mapData || !initialGameState
-                ? 'Loading macro map data…'
-                : "Awaiting Scott's final briefing…"}
-            </p>
+            <p>Loading macro map data…</p>
           </div>
         </div>
-        <TutorialModal
-          key={selectedLeaderId}
-          leaderId={selectedLeaderId}
-          onComplete={() => setTutorialComplete(true)}
-          open={!tutorialComplete}
-        />
       </div>
     )
   }
 
-  return (
-    <MacroGame
-      initialGameState={initialGameState}
-      mapData={mapData}
-      selectedLeaderId={selectedLeaderId}
-      onRequestNewGame={() => {
-        setTutorialComplete(false)
-        setHasConfirmedLeader(false)
-      }}
-    />
-  )
+  if (errorMessage || !mapData || !initialGameState) {
+    return (
+      <div className="MacroRoot">
+        <div className="MapCanvas">
+          <div className="status-panel error-panel" role="alert">
+            <p>{errorMessage ?? 'Unable to initialize game state.'}</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return <MacroGame initialGameState={initialGameState} mapData={mapData} />
 }
 
 export default App

@@ -13,6 +13,7 @@ import {
   type UpgradeTrackType,
 } from './buildings'
 import { assetUrl } from '../lib/assetUrl'
+import { LEADERS, type Leader, type LeaderId } from '../data/leaders'
 
 export type GamePhase = 'setup' | 'playing'
 
@@ -162,6 +163,11 @@ interface KingdomsPayload {
   unclaimedCountyIds?: unknown
 }
 
+interface CreateInitialGameStateOptions {
+  selectedLeaderId?: LeaderId | null
+  selectedLeader?: Leader | null
+}
+
 export const normalizeCountyId = (countyId: string | null | undefined): string =>
   countyId?.trim().toUpperCase() ?? ''
 
@@ -189,6 +195,15 @@ export const createEmptyCountyBuildQueue = (): CountyBuildQueueState => ({
   activeOrder: null,
   queuedOrders: [],
 })
+
+const getOwnedCountyPopulationTotal = (
+  countyIds: string[],
+  counties: Record<string, CountyGameState>,
+): number =>
+  countyIds.reduce((total, countyId) => {
+    const countyPopulation = counties[countyId]?.population ?? 0
+    return total + Math.max(0, Math.floor(countyPopulation))
+  }, 0)
 
 const parseCountyState = (payload: unknown): Record<string, CountyGameState> => {
   if (!payload || typeof payload !== 'object') {
@@ -351,7 +366,9 @@ const parseUnclaimedCountyIds = (payload: unknown): string[] => {
     .filter((countyId) => countyId.length > 0)
 }
 
-export const createInitialGameState = async (): Promise<GameState> => {
+export const createInitialGameState = async (
+  options: CreateInitialGameStateOptions = {},
+): Promise<GameState> => {
   const toAssetUrl = assetUrl(import.meta.env.BASE_URL)
   const [countyMetadata, startsPayload, kingdomsPayload] = await Promise.all([
     fetchJson<unknown>(toAssetUrl(COUNTY_METADATA_PATH)),
@@ -389,16 +406,92 @@ export const createInitialGameState = async (): Promise<GameState> => {
     resourcesByKingdomId[kingdom.id] = createStartingResources()
   })
 
+  const parsedCharacters = parseStartCharacters(startsPayload)
+  const fallbackCharacters: StartCharacter[] = LEADERS.map((leader) => ({
+    id: leader.id,
+    name: leader.name,
+    startCountyId: normalizeCountyId(leader.startCountyId),
+  }))
+  const availableCharacters =
+    parsedCharacters.length > 0 ? parsedCharacters : fallbackCharacters
+
+  const selectedLeader =
+    options.selectedLeader ??
+    (options.selectedLeaderId
+      ? LEADERS.find((leader) => leader.id === options.selectedLeaderId) ?? null
+      : null)
+
+  if (!selectedLeader) {
+    return {
+      gamePhase: 'setup',
+      turnNumber: 1,
+      selectedCountyId: null,
+      selectedCharacterId: null,
+      startingCountyId: null,
+      playerFactionId: null,
+      playerFactionName: null,
+      playerFactionColor: null,
+      ownedCountyIds: [],
+      resourcesByKingdomId,
+      buildQueueByCountyId: {},
+      globalBuildQueue: createEmptyCountyBuildQueue(),
+      warehouseLevel: 1,
+      lastTurnReport: null,
+      fogOfWarEnabled: true,
+      superhighwaysEnabled: false,
+      noConquestEnabled: false,
+      discoveredCountyIds: [],
+      availableCharacters,
+      kingdoms,
+      counties,
+      pendingOrders: [],
+    }
+  }
+
+  const startingCountyId = normalizeCountyId(selectedLeader.startCountyId)
+  const kingdom = kingdoms.find((candidateKingdom) =>
+    candidateKingdom.countyIds.includes(startingCountyId),
+  )
+  const playerFactionId = kingdom?.id ?? `player-${selectedLeader.id}`
+  const ownedCountyIds = kingdom
+    ? kingdom.countyIds
+    : startingCountyId
+      ? [startingCountyId]
+      : []
+
+  const countiesWithOwnedRoadMinimum = { ...counties }
+  ownedCountyIds.forEach((countyId) => {
+    const countyState = counties[countyId]
+    if (!countyState) {
+      return
+    }
+
+    countiesWithOwnedRoadMinimum[countyId] = {
+      ...countyState,
+      ownerId: playerFactionId,
+      roadLevel: countyState.roadLevel >= 1 ? countyState.roadLevel : 1,
+    }
+  })
+
+  const baseResources = createStartingResources()
+  resourcesByKingdomId[playerFactionId] = {
+    ...baseResources,
+    population: getOwnedCountyPopulationTotal(
+      ownedCountyIds,
+      countiesWithOwnedRoadMinimum,
+    ),
+  }
+
   return {
-    gamePhase: 'setup',
+    gamePhase: 'playing',
     turnNumber: 1,
-    selectedCountyId: null,
-    selectedCharacterId: null,
-    startingCountyId: null,
-    playerFactionId: null,
-    playerFactionName: null,
-    playerFactionColor: null,
-    ownedCountyIds: [],
+    selectedCountyId: startingCountyId || null,
+    selectedCharacterId: selectedLeader.id,
+    startingCountyId: startingCountyId || null,
+    playerFactionId,
+    playerFactionName: selectedLeader.faction,
+    playerFactionColor: kingdom?.color ?? '#f3c94b',
+    ownedCountyIds,
     resourcesByKingdomId,
     buildQueueByCountyId: {},
     globalBuildQueue: createEmptyCountyBuildQueue(),
@@ -407,10 +500,10 @@ export const createInitialGameState = async (): Promise<GameState> => {
     fogOfWarEnabled: true,
     superhighwaysEnabled: false,
     noConquestEnabled: false,
-    discoveredCountyIds: [],
-    availableCharacters: parseStartCharacters(startsPayload),
+    discoveredCountyIds: startingCountyId ? [startingCountyId] : [],
+    availableCharacters,
     kingdoms,
-    counties,
+    counties: countiesWithOwnedRoadMinimum,
     pendingOrders: [],
   }
 }

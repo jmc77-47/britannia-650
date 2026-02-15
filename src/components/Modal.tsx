@@ -12,6 +12,7 @@ interface ModalProps {
   labelledBy: string
   children: ReactNode
   initialFocusRef?: RefObject<HTMLElement | null>
+  surfaceClassName?: string
 }
 
 const FOCUSABLE_SELECTOR = [
@@ -34,6 +35,7 @@ export const Modal = ({
   labelledBy,
   children,
   initialFocusRef,
+  surfaceClassName,
 }: ModalProps): React.JSX.Element | null => {
   const panelRef = useRef<HTMLDivElement | null>(null)
 
@@ -133,7 +135,7 @@ export const Modal = ({
       <div
         aria-labelledby={labelledBy}
         aria-modal="true"
-        className="modal-surface is-open"
+        className={`modal-surface is-open${surfaceClassName ? ` ${surfaceClassName}` : ''}`}
         onMouseDown={(event) => event.stopPropagation()}
         ref={panelRef}
         role="dialog"

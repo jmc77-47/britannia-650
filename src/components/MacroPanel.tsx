@@ -470,6 +470,13 @@ export function MacroPanel({
         </p>
       </section>
 
+      <section className="drawer-section macro-panel-actions">
+        <button className="macro-end-turn-button" onClick={onEndTurn} type="button">
+          End Turn (Enter)
+        </button>
+        <p className="macro-end-turn-shortcut subtle">Shortcut: Enter</p>
+      </section>
+
       <section className="drawer-section development-section premium-section">
         <button
           aria-expanded={openSections.overview}
@@ -559,7 +566,6 @@ export function MacroPanel({
                 <span>No active county build.</span>
               )}
             </div>
-            <p className="overview-hint subtle">Press Enter to end turn.</p>
           </div>
         )}
       </section>
@@ -887,11 +893,6 @@ export function MacroPanel({
         )}
       </section>
 
-      <section className="drawer-section macro-panel-actions">
-        <button className="macro-end-turn-button" onClick={onEndTurn} type="button">
-          End Turn
-        </button>
-      </section>
     </aside>
   )
 }

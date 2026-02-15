@@ -26,6 +26,7 @@ interface CountyMarkersProps {
 }
 
 const SLOT_X_OFFSETS = [-9, -3, 3, 9]
+const COUNTY_MARKER_SCALE = 2 / 3
 const MARKER_EMOJI_BY_KIND: Record<CountyMarkerKind, string> = {
   PALISADE: '🛡️',
   MARKET: '🏛️',
@@ -60,26 +61,28 @@ export function CountyMarkers({ portMarkers, countyMarkers }: CountyMarkersProps
             key={`county-marker-row-${marker.countyId}`}
             transform={`translate(${marker.centroid[0]} ${marker.centroid[1] + 6})`}
           >
-            {marker.markerKinds.map((kind, markerIndex) => (
-              <g
-                className="county-marker-icon"
-                key={`${marker.countyId}-${kind}-${markerIndex}`}
-                transform={`translate(${SLOT_X_OFFSETS[markerIndex] ?? 0} 0)`}
-              >
-                <circle className="marker-chip" cx="0" cy="0" r="4.2" />
-                <text className="marker-emoji" dy="0.34em" textAnchor="middle">
-                  {MARKER_EMOJI_BY_KIND[kind]}
-                </text>
-              </g>
-            ))}
-            {marker.overflowCount > 0 && (
-              <g className="county-marker-overflow" transform="translate(15 0)">
-                <circle className="marker-chip marker-chip-overflow" cx="0" cy="0" r="4.1" />
-                <text dy="0.35em" textAnchor="middle">
-                  +{marker.overflowCount}
-                </text>
-              </g>
-            )}
+            <g transform={`scale(${COUNTY_MARKER_SCALE})`}>
+              {marker.markerKinds.map((kind, markerIndex) => (
+                <g
+                  className="county-marker-icon"
+                  key={`${marker.countyId}-${kind}-${markerIndex}`}
+                  transform={`translate(${SLOT_X_OFFSETS[markerIndex] ?? 0} 0)`}
+                >
+                  <circle className="marker-chip" cx="0" cy="0" r="4.2" />
+                  <text className="marker-emoji" dy="0.34em" textAnchor="middle">
+                    {MARKER_EMOJI_BY_KIND[kind]}
+                  </text>
+                </g>
+              ))}
+              {marker.overflowCount > 0 && (
+                <g className="county-marker-overflow" transform="translate(15 0)">
+                  <circle className="marker-chip marker-chip-overflow" cx="0" cy="0" r="4.1" />
+                  <text dy="0.35em" textAnchor="middle">
+                    +{marker.overflowCount}
+                  </text>
+                </g>
+              )}
+            </g>
           </g>
         ))}
       </g>
