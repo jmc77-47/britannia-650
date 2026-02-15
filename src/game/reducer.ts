@@ -1,12 +1,24 @@
 import {
   MAX_TRACK_LEVEL,
+  MAX_WAREHOUSE_LEVEL,
   addResourceDelta,
+  costFitsStorageCaps,
+  createEmptyBuildingLevels,
+  doesBuildingTrackConsumeSlot,
+  getStorageCapsForWarehouseLevel,
   getTrackUpgradeCost,
   getTrackUpgradeTurns,
   hasEnoughResources,
+  isBuildingTrack,
   subtractResourceDelta,
+  type BuildingLevels,
   type UpgradeTrackType,
 } from './buildings'
+import {
+  getCountyBuildSlotsCapForBuildingLevels,
+  getCountyBuildSlotsUsedForBuildingLevels,
+  getCountyPopulationUsedForBuildingLevels,
+} from './economy'
 import { resolveTurn } from './resolveTurn'
 import {
   createEmptyCountyBuildQueue,
@@ -45,8 +57,15 @@ export type GameAction =
       trackType: UpgradeTrackType
     }
   | {
+      type: 'QUEUE_WAREHOUSE_UPGRADE'
+    }
+  | {
       type: 'REMOVE_QUEUED_BUILD_ORDER'
       countyId: string
+      queueIndex: number
+    }
+  | {
+      type: 'REMOVE_QUEUED_WAREHOUSE_ORDER'
       queueIndex: number
     }
   | {
@@ -79,6 +98,10 @@ const getTrackLevelInCounty = (
     return county.roadLevel
   }
 
+  if (trackType === 'WAREHOUSE') {
+    return 0
+  }
+
   return county.buildings[trackType] ?? 0
 }
 
@@ -101,6 +124,49 @@ const getQueuedTrackIncrements = (
   return pendingIncrements
 }
 
+const getQueuedBuildingLevelIncrements = (
+  queueState: CountyBuildQueueState,
+): Record<string, number> => {
+  const increments: Record<string, number> = {}
+  const allOrders = [queueState.activeOrder, ...queueState.queuedOrders].filter(
+    (order): order is CountyBuildOrder => !!order,
+  )
+
+  allOrders.forEach((order) => {
+    if (!isBuildingTrack(order.trackType)) {
+      return
+    }
+
+    increments[order.trackType] =
+      (increments[order.trackType] ?? 0) + order.targetLevelDelta
+  })
+
+  return increments
+}
+
+const getProjectedBuildingLevelsForQueue = (
+  countyId: string,
+  state: GameState,
+  queueState: CountyBuildQueueState,
+): BuildingLevels => {
+  const countyState = state.counties[countyId]
+  if (!countyState) {
+    return createEmptyBuildingLevels()
+  }
+
+  const projectedLevels: BuildingLevels = { ...countyState.buildings }
+  const queuedIncrements = getQueuedBuildingLevelIncrements(queueState)
+
+  Object.entries(queuedIncrements).forEach(([buildingType, increment]) => {
+    projectedLevels[buildingType] = Math.max(
+      0,
+      (projectedLevels[buildingType] ?? 0) + increment,
+    )
+  })
+
+  return projectedLevels
+}
+
 const getUsedOrderIds = (queueState: CountyBuildQueueState): Set<string> => {
   const ids = new Set<string>()
   if (queueState.activeOrder) {
@@ -111,22 +177,31 @@ const getUsedOrderIds = (queueState: CountyBuildQueueState): Set<string> => {
 }
 
 const createBuildOrderId = (
-  countyId: string,
+  queueOwnerId: string,
   trackType: UpgradeTrackType,
   turnNumber: number,
   queueState: CountyBuildQueueState,
 ): string => {
   const usedIds = getUsedOrderIds(queueState)
   let sequence = usedIds.size + 1
-  let candidate = `${countyId}-${trackType}-${turnNumber}-${sequence}`
+  let candidate = `${queueOwnerId}-${trackType}-${turnNumber}-${sequence}`
 
   while (usedIds.has(candidate)) {
     sequence += 1
-    candidate = `${countyId}-${trackType}-${turnNumber}-${sequence}`
+    candidate = `${queueOwnerId}-${trackType}-${turnNumber}-${sequence}`
   }
 
   return candidate
 }
+
+const getOwnedCountyPopulationTotal = (
+  countyIds: string[],
+  counties: GameState['counties'],
+): number =>
+  countyIds.reduce((total, countyId) => {
+    const countyPopulation = counties[countyId]?.population ?? 0
+    return total + Math.max(0, Math.floor(countyPopulation))
+  }, 0)
 
 export const gameReducer = (state: GameState, action: GameAction): GameState => {
   if (action.type === 'OPEN_SETUP') {
@@ -142,6 +217,8 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionColor: null,
       ownedCountyIds: [],
       buildQueueByCountyId: {},
+      globalBuildQueue: createEmptyCountyBuildQueue(),
+      warehouseLevel: 0,
       lastTurnReport: null,
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
@@ -182,9 +259,16 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       }
     })
 
+    const baseResources = createStartingResources()
     const resourcesByKingdomId = {
       ...state.resourcesByKingdomId,
-      [playerFactionId]: createStartingResources(),
+      [playerFactionId]: {
+        ...baseResources,
+        population: getOwnedCountyPopulationTotal(
+          ownedCountyIds,
+          countiesWithOwnedRoadMinimum,
+        ),
+      },
     }
     const discoveredCountyIds = normalizeCountyIdList(
       action.discoveredCountyIds ?? [startingCountyId],
@@ -207,6 +291,8 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       counties: countiesWithOwnedRoadMinimum,
       resourcesByKingdomId,
       buildQueueByCountyId: {},
+      globalBuildQueue: createEmptyCountyBuildQueue(),
+      warehouseLevel: 0,
       lastTurnReport: null,
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
@@ -261,6 +347,10 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       return state
     }
 
+    if (action.trackType === 'WAREHOUSE') {
+      return state
+    }
+
     const countyId = normalizeCountyId(action.countyId)
     if (!countyId || !state.counties[countyId] || !state.ownedCountyIds.includes(countyId)) {
       return state
@@ -291,8 +381,44 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     }
 
     const upgradeCost = getTrackUpgradeCost(action.trackType, nextLevel)
+    const storageCaps = getStorageCapsForWarehouseLevel(state.warehouseLevel)
+    if (!costFitsStorageCaps(upgradeCost, storageCaps)) {
+      return state
+    }
+
     if (!hasEnoughResources(playerResources, upgradeCost)) {
       return state
+    }
+
+    const countyState = state.counties[countyId]
+    if (isBuildingTrack(action.trackType) && countyState) {
+      const projectedLevels = getProjectedBuildingLevelsForQueue(
+        countyId,
+        state,
+        existingQueueState,
+      )
+
+      if (
+        doesBuildingTrackConsumeSlot(action.trackType) &&
+        (projectedLevels[action.trackType] ?? 0) <= 0
+      ) {
+        const slotsUsed = getCountyBuildSlotsUsedForBuildingLevels(projectedLevels)
+        const slotsCap = getCountyBuildSlotsCapForBuildingLevels(projectedLevels)
+        if (slotsUsed >= slotsCap) {
+          return state
+        }
+      }
+
+      const projectedLevelsAfterUpgrade = {
+        ...projectedLevels,
+        [action.trackType]: (projectedLevels[action.trackType] ?? 0) + 1,
+      }
+      const projectedPopulationUsed = getCountyPopulationUsedForBuildingLevels(
+        projectedLevelsAfterUpgrade,
+      )
+      if (projectedPopulationUsed > countyState.population) {
+        return state
+      }
     }
 
     const newOrder: CountyBuildOrder = {
@@ -323,6 +449,72 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       buildQueueByCountyId: {
         ...state.buildQueueByCountyId,
         [countyId]: nextQueueState,
+      },
+    }
+  }
+
+  if (action.type === 'QUEUE_WAREHOUSE_UPGRADE') {
+    if (state.gamePhase !== 'playing') {
+      return state
+    }
+
+    const playerFactionId = state.playerFactionId
+    if (!playerFactionId) {
+      return state
+    }
+
+    const playerResources = state.resourcesByKingdomId[playerFactionId]
+    if (!playerResources) {
+      return state
+    }
+
+    const existingQueueState = state.globalBuildQueue
+    const queuedLevels = getQueuedTrackIncrements(existingQueueState, 'WAREHOUSE')
+    const nextWarehouseLevel = state.warehouseLevel + queuedLevels + 1
+    if (nextWarehouseLevel > MAX_WAREHOUSE_LEVEL) {
+      return state
+    }
+
+    const turnsRequired = getTrackUpgradeTurns('WAREHOUSE', nextWarehouseLevel)
+    if (turnsRequired <= 0) {
+      return state
+    }
+
+    const upgradeCost = getTrackUpgradeCost('WAREHOUSE', nextWarehouseLevel)
+    const storageCaps = getStorageCapsForWarehouseLevel(state.warehouseLevel)
+    if (!costFitsStorageCaps(upgradeCost, storageCaps)) {
+      return state
+    }
+
+    if (!hasEnoughResources(playerResources, upgradeCost)) {
+      return state
+    }
+
+    const newOrder: CountyBuildOrder = {
+      id: createBuildOrderId('GLOBAL', 'WAREHOUSE', state.turnNumber, existingQueueState),
+      trackType: 'WAREHOUSE',
+      targetLevelDelta: 1,
+      turnsRemaining: turnsRequired,
+      cost: upgradeCost,
+      queuedOnTurn: state.turnNumber,
+    }
+
+    const nextGlobalQueue: CountyBuildQueueState = existingQueueState.activeOrder
+      ? {
+          ...existingQueueState,
+          queuedOrders: [...existingQueueState.queuedOrders, newOrder],
+        }
+      : {
+          ...existingQueueState,
+          activeOrder: newOrder,
+        }
+
+    return {
+      ...state,
+      globalBuildQueue: nextGlobalQueue,
+      resourcesByKingdomId: {
+        ...state.resourcesByKingdomId,
+        [playerFactionId]: subtractResourceDelta(playerResources, upgradeCost),
       },
     }
   }
@@ -375,6 +567,42 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
         [playerFactionId]: addResourceDelta(playerResources, removedOrder.cost),
       },
       buildQueueByCountyId: nextBuildQueueByCountyId,
+    }
+  }
+
+  if (action.type === 'REMOVE_QUEUED_WAREHOUSE_ORDER') {
+    if (state.gamePhase !== 'playing') {
+      return state
+    }
+
+    const queuedOrders = state.globalBuildQueue.queuedOrders
+    if (action.queueIndex < 0 || action.queueIndex >= queuedOrders.length) {
+      return state
+    }
+
+    const removedOrder = queuedOrders[action.queueIndex]
+    const nextQueuedOrders = queuedOrders.filter((_, index) => index !== action.queueIndex)
+
+    const playerFactionId = state.playerFactionId
+    if (!playerFactionId) {
+      return state
+    }
+
+    const playerResources = state.resourcesByKingdomId[playerFactionId]
+    if (!playerResources) {
+      return state
+    }
+
+    return {
+      ...state,
+      globalBuildQueue: {
+        ...state.globalBuildQueue,
+        queuedOrders: nextQueuedOrders,
+      },
+      resourcesByKingdomId: {
+        ...state.resourcesByKingdomId,
+        [playerFactionId]: addResourceDelta(playerResources, removedOrder.cost),
+      },
     }
   }
 

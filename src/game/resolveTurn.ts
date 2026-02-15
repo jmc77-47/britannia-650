@@ -3,11 +3,17 @@ import {
   addResourceDelta,
   createZeroResources,
   getCountyDefenseFromBuildingLevels,
-  type BuildingType,
+  getPopulationCapForFarmLevel,
+  isBuildingTrack,
 } from './buildings'
-import { getPlayerTurnYieldSummary } from './economy'
+import {
+  clampResourcesToStorageCaps,
+  getPlayerTurnYieldSummary,
+  getResourceDeltaBetweenStockpiles,
+} from './economy'
 import { validateOrders } from './orders'
 import {
+  createEmptyCountyBuildQueue,
   type CountyBuildQueueState,
   type GameState,
 } from './state'
@@ -37,6 +43,7 @@ export const resolveTurn = (state: GameState): GameState => {
       return
     }
 
+    let workingCountyState = countyState
     let activeOrder = queueState.activeOrder
       ? {
           ...queueState.activeOrder,
@@ -54,23 +61,23 @@ export const resolveTurn = (state: GameState): GameState => {
       if (activeOrder.turnsRemaining === 0) {
         if (activeOrder.trackType === 'ROADS') {
           const nextRoadLevel = clampTrackLevel(
-            countyState.roadLevel + activeOrder.targetLevelDelta,
+            workingCountyState.roadLevel + activeOrder.targetLevelDelta,
           )
-          nextCounties[countyId] = {
-            ...countyState,
+          workingCountyState = {
+            ...workingCountyState,
             roadLevel: nextRoadLevel,
           }
-        } else {
-          const buildingType = activeOrder.trackType as BuildingType
+        } else if (isBuildingTrack(activeOrder.trackType)) {
           const nextBuildingLevels = {
-            ...countyState.buildings,
-            [buildingType]: clampTrackLevel(
-              (countyState.buildings[buildingType] ?? 0) + activeOrder.targetLevelDelta,
+            ...workingCountyState.buildings,
+            [activeOrder.trackType]: clampTrackLevel(
+              (workingCountyState.buildings[activeOrder.trackType] ?? 0) +
+                activeOrder.targetLevelDelta,
             ),
           }
 
-          nextCounties[countyId] = {
-            ...countyState,
+          workingCountyState = {
+            ...workingCountyState,
             buildings: nextBuildingLevels,
             defense: getCountyDefenseFromBuildingLevels(nextBuildingLevels),
           }
@@ -80,6 +87,8 @@ export const resolveTurn = (state: GameState): GameState => {
       }
     }
 
+    nextCounties[countyId] = workingCountyState
+
     if (activeOrder || queuedOrders.length > 0) {
       nextBuildQueueByCountyId[countyId] = {
         activeOrder,
@@ -87,6 +96,38 @@ export const resolveTurn = (state: GameState): GameState => {
       }
     }
   })
+
+  let nextWarehouseLevel = state.warehouseLevel
+  let globalActiveOrder = state.globalBuildQueue.activeOrder
+    ? {
+        ...state.globalBuildQueue.activeOrder,
+      }
+    : null
+  const globalQueuedOrders = [...state.globalBuildQueue.queuedOrders]
+
+  if (!globalActiveOrder && globalQueuedOrders.length > 0) {
+    globalActiveOrder = globalQueuedOrders.shift() ?? null
+  }
+
+  if (globalActiveOrder) {
+    globalActiveOrder.turnsRemaining = Math.max(0, globalActiveOrder.turnsRemaining - 1)
+
+    if (globalActiveOrder.turnsRemaining === 0) {
+      if (globalActiveOrder.trackType === 'WAREHOUSE') {
+        nextWarehouseLevel = Math.min(MAX_TRACK_LEVEL, nextWarehouseLevel + 1)
+      }
+
+      globalActiveOrder = globalQueuedOrders.shift() ?? null
+    }
+  }
+
+  const nextGlobalBuildQueue: CountyBuildQueueState =
+    globalActiveOrder || globalQueuedOrders.length > 0
+      ? {
+          activeOrder: globalActiveOrder,
+          queuedOrders: globalQueuedOrders,
+        }
+      : createEmptyCountyBuildQueue()
 
   state.ownedCountyIds.forEach((countyId) => {
     const countyState = nextCounties[countyId]
@@ -100,20 +141,81 @@ export const resolveTurn = (state: GameState): GameState => {
     }
   })
 
+  const postBuildState: GameState = {
+    ...state,
+    counties: nextCounties,
+    buildQueueByCountyId: nextBuildQueueByCountyId,
+    globalBuildQueue: nextGlobalBuildQueue,
+    warehouseLevel: nextWarehouseLevel,
+  }
+
+  const turnYieldSummary = getPlayerTurnYieldSummary(postBuildState)
+
+  Object.entries(turnYieldSummary.countyPopulationDeltas).forEach(
+    ([countyId, populationDelta]) => {
+      if (populationDelta <= 0) {
+        return
+      }
+
+      const countyState = nextCounties[countyId]
+      if (!countyState) {
+        return
+      }
+
+      nextCounties[countyId] = {
+        ...countyState,
+        population: countyState.population + populationDelta,
+      }
+    },
+  )
+
   const playerFactionId = state.playerFactionId
   const basePlayerResources = playerFactionId
     ? (state.resourcesByKingdomId[playerFactionId] ?? createZeroResources())
     : createZeroResources()
 
-  const postBuildState = {
-    ...state,
-    counties: nextCounties,
-  }
-  const turnYieldSummary = getPlayerTurnYieldSummary(postBuildState)
-  const nextPlayerResources = addResourceDelta(
+  let nextPlayerResources = addResourceDelta(
     basePlayerResources,
     turnYieldSummary.totalDelta,
   )
+
+  const storageClampResult = clampResourcesToStorageCaps(
+    nextPlayerResources,
+    nextWarehouseLevel,
+  )
+  nextPlayerResources = storageClampResult.resources
+
+  const populationCapLines: string[] = []
+  state.ownedCountyIds.forEach((countyId) => {
+    const countyState = nextCounties[countyId]
+    if (!countyState) {
+      return
+    }
+
+    const populationCap = getPopulationCapForFarmLevel(countyState.buildings.FARM)
+    const clampedPopulation = Math.min(
+      Math.max(0, Math.floor(countyState.population)),
+      populationCap,
+    )
+    if (clampedPopulation !== countyState.population) {
+      populationCapLines.push(
+        `${countyState.name} (${countyId}): Population cap reached (-${countyState.population - clampedPopulation})`,
+      )
+    }
+
+    nextCounties[countyId] = {
+      ...countyState,
+      population: clampedPopulation,
+    }
+  })
+
+  const totalOwnedPopulation = state.ownedCountyIds.reduce((total, countyId) => {
+    return total + (nextCounties[countyId]?.population ?? 0)
+  }, 0)
+  nextPlayerResources = {
+    ...nextPlayerResources,
+    population: totalOwnedPopulation,
+  }
 
   const nextResourcesByKingdomId = { ...state.resourcesByKingdomId }
   if (playerFactionId) {
@@ -128,10 +230,19 @@ export const resolveTurn = (state: GameState): GameState => {
     resourcesByKingdomId: nextResourcesByKingdomId,
     turnNumber: nextTurnNumber,
     buildQueueByCountyId: nextBuildQueueByCountyId,
+    globalBuildQueue: nextGlobalBuildQueue,
+    warehouseLevel: nextWarehouseLevel,
     lastTurnReport: {
       turnNumber: nextTurnNumber,
-      resourceDeltas: turnYieldSummary.totalDelta,
-      topContributions: turnYieldSummary.contributionLines.slice(0, 5),
+      resourceDeltas: getResourceDeltaBetweenStockpiles(
+        basePlayerResources,
+        nextPlayerResources,
+      ),
+      topContributions: [
+        ...storageClampResult.wasteLines,
+        ...populationCapLines,
+        ...turnYieldSummary.contributionLines,
+      ].slice(0, 8),
     },
     pendingOrders: [],
   }

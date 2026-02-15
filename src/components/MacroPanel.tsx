@@ -5,6 +5,7 @@ import {
   TRACK_LABEL_BY_ID,
   type BuildingType,
   type ResourceDelta,
+  type StorableResourceKey,
   type UpgradeTrackType,
 } from '../game/buildings'
 import { getNonZeroResourceDeltaEntries } from '../game/economy'
@@ -24,7 +25,9 @@ export interface TrackUpgradeOption {
   turnsRequired: number
   yieldLabel: string
   costLabel: string
+  populationImpactLabel: string
   canUpgrade: boolean
+  disabledReason?: string
 }
 
 interface MacroPanelProps {
@@ -35,14 +38,30 @@ interface MacroPanelProps {
   selectedCountyDefense: number
   selectedCountyRoadLevel: number
   selectedCountyEffectiveRoadLevel: number
+  selectedCountyPopulation: number
+  selectedCountyPopulationCap: number
+  selectedCountyPopulationUsed: number
+  selectedCountyPopulationFree: number
+  selectedCountySlotsUsed: number
+  selectedCountySlotsCap: number
   selectedCountyYields: ResourceDelta
   activeBuildOrder: CountyBuildOrder | null
   queuedBuildOrders: CountyBuildOrder[]
   trackUpgradeOptions: TrackUpgradeOption[]
+  warehouseLevel: number
+  warehouseCaps: Record<StorableResourceKey, number>
+  warehouseUpgradeCostLabel: string
+  warehouseUpgradeTurns: number
+  warehouseCanUpgrade: boolean
+  warehouseUpgradeDisabledReason?: string
+  warehouseActiveOrder: CountyBuildOrder | null
+  warehouseQueuedOrders: CountyBuildOrder[]
   activeTab: MacroPanelTab
   onTabChange: (tab: MacroPanelTab) => void
   onQueueTrackUpgrade: (trackType: UpgradeTrackType) => void
+  onQueueWarehouseUpgrade: () => void
   onRemoveQueuedBuildOrder: (queueIndex: number) => void
+  onRemoveQueuedWarehouseOrder: (queueIndex: number) => void
   onEndTurn: () => void
 }
 
@@ -60,6 +79,16 @@ const STUB_COPY: Record<MacroPanelTab, string> = {
   POLICIES: 'Policy toggles and realm laws are planned for later.',
 }
 
+const STORAGE_CAP_ORDER: { key: StorableResourceKey; label: string }[] = [
+  { key: 'gold', label: 'Gold' },
+  { key: 'wood', label: 'Wood' },
+  { key: 'stone', label: 'Stone' },
+  { key: 'iron', label: 'Iron' },
+  { key: 'wool', label: 'Wool' },
+  { key: 'leather', label: 'Leather' },
+  { key: 'horses', label: 'Horses' },
+]
+
 export function MacroPanel({
   turnNumber,
   selectedCounty,
@@ -68,14 +97,30 @@ export function MacroPanel({
   selectedCountyDefense,
   selectedCountyRoadLevel,
   selectedCountyEffectiveRoadLevel,
+  selectedCountyPopulation,
+  selectedCountyPopulationCap,
+  selectedCountyPopulationUsed,
+  selectedCountyPopulationFree,
+  selectedCountySlotsUsed,
+  selectedCountySlotsCap,
   selectedCountyYields,
   activeBuildOrder,
   queuedBuildOrders,
   trackUpgradeOptions,
+  warehouseLevel,
+  warehouseCaps,
+  warehouseUpgradeCostLabel,
+  warehouseUpgradeTurns,
+  warehouseCanUpgrade,
+  warehouseUpgradeDisabledReason,
+  warehouseActiveOrder,
+  warehouseQueuedOrders,
   activeTab,
   onTabChange,
   onQueueTrackUpgrade,
+  onQueueWarehouseUpgrade,
   onRemoveQueuedBuildOrder,
+  onRemoveQueuedWarehouseOrder,
   onEndTurn,
 }: MacroPanelProps) {
   const hasSelectedCounty = selectedCounty !== null
@@ -125,6 +170,85 @@ export function MacroPanel({
         </div>
       </section>
 
+      <section className="drawer-section development-section">
+        <div className="development-header">
+          <h3>Kingdom Logistics</h3>
+          <span className="building-tag">Warehouse L{warehouseLevel}/{MAX_TRACK_LEVEL}</span>
+        </div>
+
+        <div className="development-block">
+          <p className="development-subheading">Storage Caps</p>
+          <ul className="storage-cap-list">
+            {STORAGE_CAP_ORDER.map((resource) => (
+              <li key={`storage-cap-${resource.key}`}>
+                <span>{resource.label}</span>
+                <strong>{warehouseCaps[resource.key]}</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="development-block">
+          <p className="development-subheading">Upgrade Warehouse</p>
+          <div className="queue-item">
+            <div>
+              <strong>Warehouse +1</strong>
+              <span>
+                {warehouseUpgradeCostLabel} • {warehouseUpgradeTurns} turn
+                {warehouseUpgradeTurns === 1 ? '' : 's'}
+              </span>
+            </div>
+            <button
+              className="secondary-button queue-remove-button"
+              disabled={!warehouseCanUpgrade}
+              onClick={onQueueWarehouseUpgrade}
+              type="button"
+            >
+              Upgrade
+            </button>
+          </div>
+          {!warehouseCanUpgrade && warehouseUpgradeDisabledReason && (
+            <p className="upgrade-disabled-reason">{warehouseUpgradeDisabledReason}</p>
+          )}
+        </div>
+
+        <div className="development-block">
+          <p className="development-subheading">Warehouse Queue</p>
+          {warehouseActiveOrder ? (
+            <div className="queue-item">
+              <div>
+                <strong>{TRACK_LABEL_BY_ID[warehouseActiveOrder.trackType]}</strong>
+                <span>{warehouseActiveOrder.turnsRemaining} turn(s) remaining</span>
+              </div>
+            </div>
+          ) : (
+            <p className="queue-empty">No active warehouse project.</p>
+          )}
+
+          {warehouseQueuedOrders.length > 0 ? (
+            <ul className="queue-list">
+              {warehouseQueuedOrders.map((order, queueIndex) => (
+                <li className="queue-item" key={order.id}>
+                  <div>
+                    <strong>{TRACK_LABEL_BY_ID[order.trackType]}</strong>
+                    <span>{order.turnsRemaining} turn(s)</span>
+                  </div>
+                  <button
+                    className="secondary-button queue-remove-button"
+                    onClick={() => onRemoveQueuedWarehouseOrder(queueIndex)}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="queue-empty">No queued warehouse upgrades.</p>
+          )}
+        </div>
+      </section>
+
       {hasSelectedCounty && (
         <section className="drawer-section development-section">
           <div className="development-header">
@@ -167,6 +291,18 @@ export function MacroPanel({
                 <dt>Defense</dt>
                 <dd>{selectedCountyDefense}</dd>
               </div>
+              <div>
+                <dt>Population</dt>
+                <dd>{selectedCountyPopulation} / {selectedCountyPopulationCap}</dd>
+              </div>
+              <div>
+                <dt>Workers</dt>
+                <dd>{selectedCountyPopulationUsed} used / {selectedCountyPopulationFree} free</dd>
+              </div>
+              <div>
+                <dt>Slots</dt>
+                <dd>{selectedCountySlotsUsed} / {selectedCountySlotsCap}</dd>
+              </div>
             </dl>
           </div>
 
@@ -197,9 +333,13 @@ export function MacroPanel({
                         {track.label} <span className="stats-muted">L{track.level}/{MAX_TRACK_LEVEL}</span>
                       </strong>
                       <span>{track.yieldLabel}</span>
+                      <span>{track.populationImpactLabel}</span>
                       <span>
                         {track.costLabel} • {track.turnsRequired} turn{track.turnsRequired === 1 ? '' : 's'}
                       </span>
+                      {!track.canUpgrade && track.disabledReason && (
+                        <span className="upgrade-disabled-reason">{track.disabledReason}</span>
+                      )}
                     </div>
                     <button
                       className="secondary-button queue-remove-button"

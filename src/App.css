@@ -1488,6 +1488,33 @@ button:disabled {
   color: #d3c8a9;
 }
 
+.storage-cap-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.storage-cap-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.storage-cap-list strong {
+  color: #f2e3ba;
+}
+
+.upgrade-disabled-reason {
+  margin: 0.28rem 0 0;
+  color: #e6bb92;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
 .build-action-button {
   display: flex;
   flex-direction: column;

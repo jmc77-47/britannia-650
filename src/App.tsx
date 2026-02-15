@@ -25,19 +25,34 @@ import { TurnReportModal } from './components/TurnReportModal'
 import { gameReducer } from './game/reducer'
 import {
   BUILDING_ORDER,
+  STORABLE_RESOURCE_KEYS,
   MAX_TRACK_LEVEL,
   TRACK_LABEL_BY_ID,
+  costFitsStorageCaps,
   createEmptyBuildingLevels,
   createZeroResources,
+  doesBuildingTrackConsumeSlot,
   formatCostLabel,
   getBuildingYieldForLevel,
   getCountyDefenseFromBuildingLevels,
+  getPopulationUsagePerLevelForTrack,
+  getStorageCapsForWarehouseLevel,
   getTrackUpgradeCost,
   getTrackUpgradeTurns,
   hasEnoughResources,
+  isBuildingTrack,
+  type BuildingType,
+  type StorableResourceKey,
   type UpgradeTrackType,
 } from './game/buildings'
-import { getCountyYields } from './game/economy'
+import {
+  getCountyBuildSlotsCapForBuildingLevels,
+  getCountyBuildSlotsUsedForBuildingLevels,
+  getCountyDerivedStats,
+  getCountyPopulationUsedForBuildingLevels,
+  getCountyYields,
+  getPlayerPopulationTotals,
+} from './game/economy'
 import {
   CanvasRoadLayer,
   type RoadRenderModel,
@@ -303,6 +318,9 @@ const getCountyTrackLevel = (
   if (trackType === 'ROADS') {
     return countyState.roadLevel
   }
+  if (!isBuildingTrack(trackType)) {
+    return 0
+  }
   return countyState.buildings[trackType] ?? 0
 }
 
@@ -325,6 +343,44 @@ const getQueuedTrackIncrements = (
   })
 
   return pendingIncrements
+}
+
+const getQueuedBuildingLevelIncrements = (
+  queueState: CountyBuildQueueState | null | undefined,
+): Partial<Record<BuildingType, number>> => {
+  const increments: Partial<Record<BuildingType, number>> = {}
+  if (!queueState) {
+    return increments
+  }
+
+  const queuedOrders = [queueState.activeOrder, ...queueState.queuedOrders].filter(
+    (order): order is NonNullable<CountyBuildQueueState['activeOrder']> => !!order,
+  )
+  queuedOrders.forEach((order) => {
+    if (!isBuildingTrack(order.trackType)) {
+      return
+    }
+    increments[order.trackType] = (increments[order.trackType] ?? 0) + order.targetLevelDelta
+  })
+
+  return increments
+}
+
+const applyWorkforceMultiplier = (
+  yieldDelta: Partial<Record<keyof ResourceStockpile, number>>,
+  workforceRatio: number,
+): Partial<Record<keyof ResourceStockpile, number>> => {
+  const adjusted: Partial<Record<keyof ResourceStockpile, number>> = {}
+  Object.entries(yieldDelta).forEach(([resourceKey, value]) => {
+    if (typeof value !== 'number' || value === 0) {
+      return
+    }
+    const scaledValue = Math.max(0, Math.round(value * workforceRatio))
+    if (scaledValue > 0) {
+      adjusted[resourceKey as keyof ResourceStockpile] = scaledValue
+    }
+  })
+  return adjusted
 }
 
 const isTypingTarget = (eventTarget: EventTarget | null): boolean => {
@@ -603,6 +659,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         : { activeOrder: null, queuedOrders: [] },
     [gameState.buildQueueByCountyId, selectedCountyForPanel],
   )
+  const warehouseQueueState = gameState.globalBuildQueue
   const selectedCountyOwned = useMemo(
     () =>
       selectedCountyForPanel
@@ -612,6 +669,8 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   )
   const selectedCountyActiveOrder = selectedCountyQueueState.activeOrder
   const selectedCountyQueuedOrders = selectedCountyQueueState.queuedOrders
+  const warehouseActiveOrder = warehouseQueueState.activeOrder
+  const warehouseQueuedOrders = warehouseQueueState.queuedOrders
   const selectedCountyDefense = useMemo(
     () =>
       selectedCountyState
@@ -625,6 +684,13 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         ? getCountyYields(selectedCountyForPanel.id, gameState)
         : {},
     [gameState, selectedCountyForPanel],
+  )
+  const selectedCountyDerivedStats = useMemo(
+    () =>
+      selectedCountyState
+        ? getCountyDerivedStats(selectedCountyState)
+        : null,
+    [selectedCountyState],
   )
   const selectedCountyEffectiveRoadLevel = useMemo(
     () =>
@@ -652,8 +718,40 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       gameState.resourcesByKingdomId[playerFactionId] ?? EMPTY_RESOURCE_STOCKPILE
     )
   }, [gameState.playerFactionId, gameState.resourcesByKingdomId])
-  const selectedCountyTrackUpgrades = useMemo<TrackUpgradeOption[]>(() => {
+  const playerPopulationTotals = useMemo(
+    () => getPlayerPopulationTotals(gameState),
+    [gameState],
+  )
+  const storageCaps = useMemo(
+    () => getStorageCapsForWarehouseLevel(gameState.warehouseLevel),
+    [gameState.warehouseLevel],
+  )
+  const displayResources = useMemo<ResourceStockpile>(
+    () => ({
+      ...playerResources,
+      population: playerPopulationTotals.total,
+    }),
+    [playerPopulationTotals.total, playerResources],
+  )
+  const selectedCountyProjectedBuildingLevels = useMemo(() => {
     if (!selectedCountyState) {
+      return createEmptyBuildingLevels()
+    }
+
+    const queuedIncrements = getQueuedBuildingLevelIncrements(selectedCountyQueueState)
+    const projectedLevels = { ...selectedCountyState.buildings }
+    Object.entries(queuedIncrements).forEach(([buildingType, increment]) => {
+      const buildingTrack = buildingType as BuildingType
+      projectedLevels[buildingTrack] = Math.max(
+        0,
+        (projectedLevels[buildingTrack] ?? 0) + (increment ?? 0),
+      )
+    })
+
+    return projectedLevels
+  }, [selectedCountyQueueState, selectedCountyState])
+  const selectedCountyTrackUpgrades = useMemo<TrackUpgradeOption[]>(() => {
+    if (!selectedCountyState || !selectedCountyDerivedStats) {
       return []
     }
 
@@ -672,17 +770,60 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         nextLevel <= MAX_TRACK_LEVEL
           ? getTrackUpgradeCost(trackType, nextLevel)
           : {}
-      const canUpgrade =
-        selectedCountyOwned &&
-        nextLevel <= MAX_TRACK_LEVEL &&
-        hasEnoughResources(playerResources, upgradeCost)
+
+      let disabledReason: string | undefined
+      if (!selectedCountyOwned) {
+        disabledReason = 'Only player-owned counties can be developed.'
+      } else if (nextLevel > MAX_TRACK_LEVEL) {
+        disabledReason = 'Track already at maximum level.'
+      } else if (!costFitsStorageCaps(upgradeCost, storageCaps)) {
+        disabledReason = 'Requires more storage: upgrade Warehouse.'
+      } else if (!hasEnoughResources(playerResources, upgradeCost)) {
+        disabledReason = 'Insufficient resources.'
+      }
+
+      if (!disabledReason && isBuildingTrack(trackType)) {
+        const projectedLevelsBefore = selectedCountyProjectedBuildingLevels
+        const projectedTrackLevel = projectedLevelsBefore[trackType] ?? 0
+        if (
+          doesBuildingTrackConsumeSlot(trackType) &&
+          projectedTrackLevel <= 0
+        ) {
+          const slotsUsed = getCountyBuildSlotsUsedForBuildingLevels(projectedLevelsBefore)
+          const slotsCap = getCountyBuildSlotsCapForBuildingLevels(projectedLevelsBefore)
+          if (slotsUsed >= slotsCap) {
+            disabledReason = 'Slots full: increase Farm level for more specialization slots.'
+          }
+        }
+
+        if (!disabledReason) {
+          const projectedLevelsAfter = {
+            ...projectedLevelsBefore,
+            [trackType]: projectedTrackLevel + 1,
+          }
+          const projectedPopulationUsed =
+            getCountyPopulationUsedForBuildingLevels(projectedLevelsAfter)
+          if (projectedPopulationUsed > selectedCountyState.population) {
+            disabledReason = 'Not enough population: upgrade Farm / Homesteads.'
+          }
+        }
+      }
+
+      const canUpgrade = !disabledReason
 
       let yieldLabel = 'No direct resource yield'
-      if (trackType !== 'ROADS') {
+      if (isBuildingTrack(trackType)) {
         const currentYield = getBuildingYieldForLevel(trackType, currentLevel)
+        const effectiveYield = applyWorkforceMultiplier(
+          currentYield,
+          selectedCountyDerivedStats.workforceRatio,
+        )
+        const hasEffectiveYield = Object.keys(effectiveYield).length > 0
         const hasYieldNow = Object.keys(currentYield).length > 0
-        if (hasYieldNow) {
-          yieldLabel = `${formatCostLabel(currentYield)}/turn`
+        if (hasEffectiveYield) {
+          yieldLabel = `${formatCostLabel(effectiveYield)}/turn`
+        } else if (hasYieldNow) {
+          yieldLabel = 'Yield blocked by workforce/cap limits'
         } else {
           const baseYield = getBuildingYieldForLevel(trackType, 1)
           yieldLabel =
@@ -692,25 +833,86 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         }
       }
 
+      let populationImpactLabel = 'No workforce upkeep'
+      const populationUsagePerLevel = getPopulationUsagePerLevelForTrack(trackType)
+      if (populationUsagePerLevel > 0) {
+        populationImpactLabel = `+${populationUsagePerLevel} workers / level`
+      } else if (trackType === 'FARM') {
+        populationImpactLabel = 'Increases population cap and slots'
+      } else if (trackType === 'ROADS') {
+        populationImpactLabel = 'No workforce upkeep'
+      }
+
+      if (trackType === 'ROADS') {
+        yieldLabel = 'Improves travel and infrastructure'
+      }
+
+      if (trackType === 'FARM' && currentLevel > 0) {
+        yieldLabel = 'Raises population cap and specialization room'
+      }
+
       return {
         trackType,
         label: TRACK_LABEL_BY_ID[trackType],
         level: currentLevel,
         turnsRequired,
         yieldLabel,
+        populationImpactLabel,
         costLabel:
           nextLevel <= MAX_TRACK_LEVEL
             ? formatCostLabel(upgradeCost)
             : 'Max level reached',
         canUpgrade,
+        disabledReason,
       }
     })
   }, [
     playerResources,
+    selectedCountyDerivedStats,
     selectedCountyOwned,
     selectedCountyQueueState,
     selectedCountyState,
+    selectedCountyProjectedBuildingLevels,
+    storageCaps,
   ])
+  const warehouseUpgradeData = useMemo(() => {
+    const queuedWarehouseLevels = getQueuedTrackIncrements(
+      warehouseQueueState,
+      'WAREHOUSE',
+    )
+    const nextWarehouseLevel = gameState.warehouseLevel + queuedWarehouseLevels + 1
+    const turnsRequired =
+      nextWarehouseLevel <= MAX_TRACK_LEVEL
+        ? getTrackUpgradeTurns('WAREHOUSE', nextWarehouseLevel)
+        : 0
+    const cost =
+      nextWarehouseLevel <= MAX_TRACK_LEVEL
+        ? getTrackUpgradeCost('WAREHOUSE', nextWarehouseLevel)
+        : {}
+
+    let disabledReason: string | undefined
+    if (nextWarehouseLevel > MAX_TRACK_LEVEL) {
+      disabledReason = 'Warehouse already at maximum level.'
+    } else if (!costFitsStorageCaps(cost, storageCaps)) {
+      disabledReason = 'Requires more storage: warehouse cost exceeds current capacity.'
+    } else if (!hasEnoughResources(playerResources, cost)) {
+      disabledReason = 'Insufficient resources.'
+    }
+
+    return {
+      cost,
+      turnsRequired,
+      canUpgrade: !disabledReason,
+      disabledReason,
+    }
+  }, [gameState.warehouseLevel, playerResources, storageCaps, warehouseQueueState])
+
+  const selectedCountyPopulation = selectedCountyDerivedStats?.population ?? 0
+  const selectedCountyPopulationCap = selectedCountyDerivedStats?.populationCap ?? 0
+  const selectedCountyPopulationUsed = selectedCountyDerivedStats?.populationUsed ?? 0
+  const selectedCountyPopulationFree = selectedCountyDerivedStats?.populationFree ?? 0
+  const selectedCountySlotsUsed = selectedCountyDerivedStats?.buildSlotsUsed ?? 0
+  const selectedCountySlotsCap = selectedCountyDerivedStats?.buildSlotsCap ?? 0
 
   const kingdomByCountyId = useMemo(() => {
     const map = new Map<
@@ -1147,6 +1349,15 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     },
     [selectedCountyForPanel],
   )
+  const queueWarehouseUpgrade = useCallback(() => {
+    dispatch({ type: 'QUEUE_WAREHOUSE_UPGRADE' })
+  }, [])
+  const removeQueuedWarehouseOrder = useCallback((queueIndex: number) => {
+    dispatch({
+      type: 'REMOVE_QUEUED_WAREHOUSE_ORDER',
+      queueIndex,
+    })
+  }, [])
   const handleEndTurn = useCallback(() => {
     dispatch({ type: 'END_TURN' })
   }, [])
@@ -1444,7 +1655,16 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
             {RESOURCE_RIBBON_ITEMS.map((resource) => (
               <li className="resource-pill" key={resource.key} title={resource.label}>
                 <span className="resource-pill-label">{resource.label}</span>
-                <strong>{formatResourceValue(playerResources[resource.key])}</strong>
+                {STORABLE_RESOURCE_KEYS.includes(resource.key as StorableResourceKey) ? (
+                  <strong>
+                    {formatResourceValue(displayResources[resource.key])}/
+                    {formatResourceValue(
+                      storageCaps[resource.key as StorableResourceKey],
+                    )}
+                  </strong>
+                ) : (
+                  <strong>{formatResourceValue(displayResources[resource.key])}</strong>
+                )}
               </li>
             ))}
           </ul>
@@ -1479,15 +1699,31 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
           activeTab={activeTab}
           onEndTurn={handleEndTurn}
           onQueueTrackUpgrade={queueTrackUpgradeForSelectedCounty}
+          onQueueWarehouseUpgrade={queueWarehouseUpgrade}
           onRemoveQueuedBuildOrder={removeQueuedOrderForSelectedCounty}
+          onRemoveQueuedWarehouseOrder={removeQueuedWarehouseOrder}
           onTabChange={setActiveTab}
           activeBuildOrder={selectedCountyActiveOrder}
           queuedBuildOrders={selectedCountyQueuedOrders}
+          warehouseActiveOrder={warehouseActiveOrder}
+          warehouseQueuedOrders={warehouseQueuedOrders}
+          warehouseLevel={gameState.warehouseLevel}
+          warehouseCaps={storageCaps}
+          warehouseUpgradeCostLabel={formatCostLabel(warehouseUpgradeData.cost)}
+          warehouseUpgradeDisabledReason={warehouseUpgradeData.disabledReason}
+          warehouseUpgradeTurns={warehouseUpgradeData.turnsRequired}
+          warehouseCanUpgrade={warehouseUpgradeData.canUpgrade}
           selectedCountyBuildingLevels={
             selectedCountyState?.buildings ?? createEmptyBuildingLevels()
           }
           selectedCountyDefense={selectedCountyDefense}
           selectedCountyEffectiveRoadLevel={selectedCountyEffectiveRoadLevel}
+          selectedCountyPopulation={selectedCountyPopulation}
+          selectedCountyPopulationCap={selectedCountyPopulationCap}
+          selectedCountyPopulationUsed={selectedCountyPopulationUsed}
+          selectedCountyPopulationFree={selectedCountyPopulationFree}
+          selectedCountySlotsUsed={selectedCountySlotsUsed}
+          selectedCountySlotsCap={selectedCountySlotsCap}
           selectedCountyRoadLevel={selectedCountyState?.roadLevel ?? 0}
           trackUpgradeOptions={selectedCountyTrackUpgrades}
           selectedCountyYields={selectedCountyYields}

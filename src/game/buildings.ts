@@ -1,6 +1,7 @@
 import type { ResourceStockpile } from './state'
 
 export type BuildingType =
+  | 'FARM'
   | 'HOMESTEADS'
   | 'LUMBER_CAMP'
   | 'PALISADE'
@@ -11,13 +12,17 @@ export type BuildingType =
   | 'WEAVERY'
   | 'MARKET'
 
-export type UpgradeTrackType = BuildingType | 'ROADS'
+export type UpgradeTrackType = BuildingType | 'ROADS' | 'WAREHOUSE'
 
 export type BuildingLevels = Record<BuildingType, number>
 
 export type ResourceKey = keyof ResourceStockpile
 
+export type StorableResourceKey = Exclude<ResourceKey, 'population'>
+
 export type ResourceDelta = Partial<Record<ResourceKey, number>>
+
+export type StorageCaps = Record<StorableResourceKey, number>
 
 export interface BuildingDefinition {
   id: BuildingType
@@ -28,6 +33,7 @@ export interface BuildingDefinition {
   baseCost: ResourceDelta
   yieldsPerTurnPerLevel: ResourceDelta
   defensePerLevel: number
+  populationUsagePerLevel: number
 }
 
 export const RESOURCE_KEYS: ResourceKey[] = [
@@ -41,9 +47,21 @@ export const RESOURCE_KEYS: ResourceKey[] = [
   'horses',
 ]
 
+export const STORABLE_RESOURCE_KEYS: StorableResourceKey[] = [
+  'gold',
+  'wood',
+  'stone',
+  'iron',
+  'wool',
+  'leather',
+  'horses',
+]
+
 export const MAX_TRACK_LEVEL = 20
+export const MAX_WAREHOUSE_LEVEL = 20
 
 export const BUILDING_ORDER: BuildingType[] = [
+  'FARM',
   'HOMESTEADS',
   'LUMBER_CAMP',
   'QUARRY',
@@ -55,21 +73,58 @@ export const BUILDING_ORDER: BuildingType[] = [
   'PALISADE',
 ]
 
+const BUILDING_SLOT_EXEMPT_TYPES = new Set<BuildingType>(['FARM', 'PALISADE'])
+
+const WAREHOUSE_CAP_BASE: StorageCaps = {
+  gold: 800,
+  wood: 400,
+  stone: 250,
+  iron: 150,
+  wool: 200,
+  leather: 150,
+  horses: 80,
+}
+
+const WAREHOUSE_CAP_PER_LEVEL: StorageCaps = {
+  gold: 250,
+  wood: 150,
+  stone: 100,
+  iron: 60,
+  wool: 80,
+  leather: 60,
+  horses: 25,
+}
+
 export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
+  FARM: {
+    id: 'FARM',
+    label: 'Farm',
+    shortLabel: 'Farm',
+    badge: 'Agrarian',
+    description: 'Expands county population capacity and unlocks specialization room.',
+    baseCost: {
+      gold: 55,
+      wood: 32,
+    },
+    yieldsPerTurnPerLevel: {},
+    defensePerLevel: 0,
+    populationUsagePerLevel: 0,
+  },
   HOMESTEADS: {
     id: 'HOMESTEADS',
     label: 'Homesteads',
     shortLabel: 'Homesteads',
     badge: 'Settled',
-    description: 'Expand local settlement and grow population each turn.',
+    description: 'Expand local settlement and drive population growth each turn.',
     baseCost: {
-      gold: 70,
-      wood: 50,
+      gold: 72,
+      wood: 52,
     },
     yieldsPerTurnPerLevel: {
       population: 2,
     },
     defensePerLevel: 0,
+    populationUsagePerLevel: 1,
   },
   LUMBER_CAMP: {
     id: 'LUMBER_CAMP',
@@ -84,6 +139,7 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
       wood: 2,
     },
     defensePerLevel: 0,
+    populationUsagePerLevel: 2,
   },
   QUARRY: {
     id: 'QUARRY',
@@ -92,13 +148,14 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
     badge: 'Stoneworks',
     description: 'Extract local stone for construction and trade.',
     baseCost: {
-      gold: 90,
-      wood: 35,
+      gold: 78,
+      wood: 28,
     },
     yieldsPerTurnPerLevel: {
       stone: 2,
     },
     defensePerLevel: 0,
+    populationUsagePerLevel: 2,
   },
   MINE: {
     id: 'MINE',
@@ -107,13 +164,15 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
     badge: 'Ore',
     description: 'Open mineral shafts to increase iron production.',
     baseCost: {
-      gold: 105,
-      wood: 25,
+      gold: 60,
+      wood: 20,
+      stone: 10,
     },
     yieldsPerTurnPerLevel: {
       iron: 2,
     },
     defensePerLevel: 0,
+    populationUsagePerLevel: 3,
   },
   PASTURE: {
     id: 'PASTURE',
@@ -122,13 +181,14 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
     badge: 'Herds',
     description: 'Raise horse stock with organized grazing lands.',
     baseCost: {
-      gold: 85,
-      wood: 20,
+      gold: 82,
+      wood: 18,
     },
     yieldsPerTurnPerLevel: {
       horses: 2,
     },
     defensePerLevel: 0,
+    populationUsagePerLevel: 1,
   },
   TANNERY: {
     id: 'TANNERY',
@@ -137,13 +197,14 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
     badge: 'Leatherworks',
     description: 'Process hides into leather for military and trade use.',
     baseCost: {
-      gold: 100,
-      wood: 30,
+      gold: 88,
+      wood: 24,
     },
     yieldsPerTurnPerLevel: {
       leather: 2,
     },
     defensePerLevel: 0,
+    populationUsagePerLevel: 2,
   },
   WEAVERY: {
     id: 'WEAVERY',
@@ -152,13 +213,14 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
     badge: 'Textiles',
     description: 'Turn fiber into woven output and improve wool flow.',
     baseCost: {
-      gold: 95,
-      wood: 18,
+      gold: 84,
+      wood: 20,
     },
     yieldsPerTurnPerLevel: {
       wool: 2,
     },
     defensePerLevel: 0,
+    populationUsagePerLevel: 2,
   },
   MARKET: {
     id: 'MARKET',
@@ -167,13 +229,14 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
     badge: 'Trade Hub',
     description: 'Formalize commerce and improve tax intake.',
     baseCost: {
-      gold: 120,
-      wood: 40,
+      gold: 110,
+      wood: 32,
     },
     yieldsPerTurnPerLevel: {
       gold: 2,
     },
     defensePerLevel: 0,
+    populationUsagePerLevel: 2,
   },
   PALISADE: {
     id: 'PALISADE',
@@ -182,11 +245,12 @@ export const BUILDING_DEFINITIONS: Record<BuildingType, BuildingDefinition> = {
     badge: 'Fortified',
     description: 'Raise wooden defenses around the local strongpoint.',
     baseCost: {
-      gold: 110,
-      wood: 90,
+      gold: 105,
+      wood: 80,
     },
     yieldsPerTurnPerLevel: {},
     defensePerLevel: 2,
+    populationUsagePerLevel: 1,
   },
 }
 
@@ -195,6 +259,7 @@ const RESOURCE_NAME_OVERRIDES: Partial<Record<ResourceKey, string>> = {
 }
 
 export const TRACK_LABEL_BY_ID: Record<UpgradeTrackType, string> = {
+  FARM: BUILDING_DEFINITIONS.FARM.label,
   HOMESTEADS: BUILDING_DEFINITIONS.HOMESTEADS.label,
   LUMBER_CAMP: BUILDING_DEFINITIONS.LUMBER_CAMP.label,
   PALISADE: BUILDING_DEFINITIONS.PALISADE.label,
@@ -205,6 +270,7 @@ export const TRACK_LABEL_BY_ID: Record<UpgradeTrackType, string> = {
   WEAVERY: BUILDING_DEFINITIONS.WEAVERY.label,
   MARKET: BUILDING_DEFINITIONS.MARKET.label,
   ROADS: 'Roads',
+  WAREHOUSE: 'Warehouse',
 }
 
 const clampTrackLevel = (level: number): number => {
@@ -213,6 +279,29 @@ const clampTrackLevel = (level: number): number => {
   }
   const normalizedLevel = Math.floor(level)
   return Math.max(0, Math.min(MAX_TRACK_LEVEL, normalizedLevel))
+}
+
+export const clampWarehouseLevel = (level: number): number => {
+  if (!Number.isFinite(level)) {
+    return 0
+  }
+  return Math.max(0, Math.min(MAX_WAREHOUSE_LEVEL, Math.floor(level)))
+}
+
+export const isBuildingTrack = (trackType: UpgradeTrackType): trackType is BuildingType =>
+  trackType in BUILDING_DEFINITIONS
+
+export const doesBuildingTrackConsumeSlot = (buildingType: BuildingType): boolean =>
+  !BUILDING_SLOT_EXEMPT_TYPES.has(buildingType)
+
+export const getPopulationUsagePerLevelForTrack = (
+  trackType: UpgradeTrackType,
+): number => {
+  if (!isBuildingTrack(trackType)) {
+    return 0
+  }
+
+  return BUILDING_DEFINITIONS[trackType].populationUsagePerLevel
 }
 
 export const createZeroResources = (): ResourceStockpile => ({
@@ -227,6 +316,7 @@ export const createZeroResources = (): ResourceStockpile => ({
 })
 
 export const createEmptyBuildingLevels = (): BuildingLevels => ({
+  FARM: 0,
   HOMESTEADS: 0,
   LUMBER_CAMP: 0,
   PALISADE: 0,
@@ -332,6 +422,23 @@ const scaleCostValueForLevel = (baseValue: number, nextLevel: number): number =>
   return Math.max(1, Math.round(baseValue * multiplier))
 }
 
+export const getYieldMilestoneMultiplier = (level: number): number => {
+  const clampedLevel = clampTrackLevel(level)
+  if (clampedLevel >= 20) {
+    return 1.5
+  }
+  if (clampedLevel >= 15) {
+    return 1.35
+  }
+  if (clampedLevel >= 10) {
+    return 1.2
+  }
+  if (clampedLevel >= 5) {
+    return 1.1
+  }
+  return 1
+}
+
 export const getBuildingUpgradeTurns = (nextLevel: number): number => {
   const level = clampTrackLevel(nextLevel)
   if (level <= 0) {
@@ -339,6 +446,9 @@ export const getBuildingUpgradeTurns = (nextLevel: number): number => {
   }
   return 1 + Math.floor((level - 1) / 4)
 }
+
+export const getWarehouseUpgradeTurns = (nextLevel: number): number =>
+  getBuildingUpgradeTurns(nextLevel)
 
 export const getBuildingUpgradeCost = (
   buildingType: BuildingType,
@@ -358,6 +468,30 @@ export const getBuildingUpgradeCost = (
       scaledCost[resourceKey] = scaledValue
     }
   })
+  return scaledCost
+}
+
+export const getWarehouseUpgradeCost = (nextWarehouseLevel: number): ResourceDelta => {
+  const level = clampWarehouseLevel(nextWarehouseLevel)
+  if (level <= 0) {
+    return {}
+  }
+
+  const baseCost: ResourceDelta = {
+    gold: 220,
+    wood: 130,
+    stone: 90,
+  }
+
+  const scaledCost: ResourceDelta = {}
+  RESOURCE_KEYS.forEach((resourceKey) => {
+    const baseValue = baseCost[resourceKey] ?? 0
+    const scaledValue = scaleCostValueForLevel(baseValue, level)
+    if (scaledValue > 0) {
+      scaledCost[resourceKey] = scaledValue
+    }
+  })
+
   return scaledCost
 }
 
@@ -388,7 +522,7 @@ export const getRoadUpgradeCost = (nextRoadLevel: number): ResourceDelta => {
   }
 
   const cost: ResourceDelta = {
-    gold: 25 * level * level,
+    gold: 14 * level * level,
   }
 
   if (level >= 4) {
@@ -401,18 +535,89 @@ export const getRoadUpgradeCost = (nextRoadLevel: number): ResourceDelta => {
 export const getTrackUpgradeTurns = (
   trackType: UpgradeTrackType,
   nextLevel: number,
-): number =>
-  trackType === 'ROADS'
-    ? getRoadUpgradeTurns(nextLevel)
-    : getBuildingUpgradeTurns(nextLevel)
+): number => {
+  if (trackType === 'ROADS') {
+    return getRoadUpgradeTurns(nextLevel)
+  }
+
+  if (trackType === 'WAREHOUSE') {
+    return getWarehouseUpgradeTurns(nextLevel)
+  }
+
+  return getBuildingUpgradeTurns(nextLevel)
+}
 
 export const getTrackUpgradeCost = (
   trackType: UpgradeTrackType,
   nextLevel: number,
-): ResourceDelta =>
-  trackType === 'ROADS'
-    ? getRoadUpgradeCost(nextLevel)
-    : getBuildingUpgradeCost(trackType, nextLevel)
+): ResourceDelta => {
+  if (trackType === 'ROADS') {
+    return getRoadUpgradeCost(nextLevel)
+  }
+
+  if (trackType === 'WAREHOUSE') {
+    return getWarehouseUpgradeCost(nextLevel)
+  }
+
+  return getBuildingUpgradeCost(trackType, nextLevel)
+}
+
+export const getStorageCapsForWarehouseLevel = (
+  warehouseLevel: number,
+): StorageCaps => {
+  const level = clampWarehouseLevel(warehouseLevel)
+  return {
+    gold: WAREHOUSE_CAP_BASE.gold + WAREHOUSE_CAP_PER_LEVEL.gold * level,
+    wood: WAREHOUSE_CAP_BASE.wood + WAREHOUSE_CAP_PER_LEVEL.wood * level,
+    stone: WAREHOUSE_CAP_BASE.stone + WAREHOUSE_CAP_PER_LEVEL.stone * level,
+    iron: WAREHOUSE_CAP_BASE.iron + WAREHOUSE_CAP_PER_LEVEL.iron * level,
+    wool: WAREHOUSE_CAP_BASE.wool + WAREHOUSE_CAP_PER_LEVEL.wool * level,
+    leather: WAREHOUSE_CAP_BASE.leather + WAREHOUSE_CAP_PER_LEVEL.leather * level,
+    horses: WAREHOUSE_CAP_BASE.horses + WAREHOUSE_CAP_PER_LEVEL.horses * level,
+  }
+}
+
+export const getMaxStorageCapsAtWarehouseLevel20 = (): StorageCaps =>
+  getStorageCapsForWarehouseLevel(MAX_WAREHOUSE_LEVEL)
+
+export const costFitsStorageCaps = (
+  cost: ResourceDelta,
+  storageCaps: StorageCaps,
+): boolean =>
+  STORABLE_RESOURCE_KEYS.every(
+    (resourceKey) => (cost[resourceKey] ?? 0) <= storageCaps[resourceKey],
+  )
+
+export const getStorageShortfallsForCost = (
+  cost: ResourceDelta,
+  storageCaps: StorageCaps,
+): Array<{ resourceKey: StorableResourceKey; required: number; cap: number }> =>
+  STORABLE_RESOURCE_KEYS.filter(
+    (resourceKey) => (cost[resourceKey] ?? 0) > storageCaps[resourceKey],
+  ).map((resourceKey) => ({
+    resourceKey,
+    required: cost[resourceKey] ?? 0,
+    cap: storageCaps[resourceKey],
+  }))
+
+export const getMaxAffordableCostForTrackAtWarehouseLevel = (
+  trackType: UpgradeTrackType,
+  nextLevel: number,
+  warehouseLevel: number,
+): ResourceDelta => {
+  const rawCost = getTrackUpgradeCost(trackType, nextLevel)
+  const storageCaps = getStorageCapsForWarehouseLevel(warehouseLevel)
+  const boundedCost: ResourceDelta = { ...rawCost }
+
+  STORABLE_RESOURCE_KEYS.forEach((resourceKey) => {
+    const costValue = rawCost[resourceKey] ?? 0
+    if (costValue > storageCaps[resourceKey]) {
+      boundedCost[resourceKey] = storageCaps[resourceKey]
+    }
+  })
+
+  return boundedCost
+}
 
 export const getBuildingYieldForLevel = (
   buildingType: BuildingType,
@@ -424,6 +629,7 @@ export const getBuildingYieldForLevel = (
   }
 
   const definition = BUILDING_DEFINITIONS[buildingType]
+  const multiplier = getYieldMilestoneMultiplier(clampedLevel)
   const delta: ResourceDelta = {}
 
   RESOURCE_KEYS.forEach((resourceKey) => {
@@ -432,11 +638,53 @@ export const getBuildingYieldForLevel = (
       return
     }
 
-    delta[resourceKey] = perLevelAmount * clampedLevel
+    const scaledValue = Math.round(perLevelAmount * clampedLevel * multiplier)
+    if (scaledValue !== 0) {
+      delta[resourceKey] = scaledValue
+    }
   })
 
   return delta
 }
+
+export const getPopulationCapForFarmLevel = (farmLevel: number): number => {
+  const clampedFarmLevel = clampTrackLevel(farmLevel)
+  if (clampedFarmLevel <= 0) {
+    return 0
+  }
+
+  return 120 + (clampedFarmLevel - 1) * 45
+}
+
+export const getBuildSlotsCapForFarmLevel = (farmLevel: number): number =>
+  Math.min(7, 2 + Math.floor(clampTrackLevel(farmLevel) / 4))
+
+export const getPopulationUsedForBuildingLevels = (
+  buildingLevels: BuildingLevels,
+): number =>
+  BUILDING_ORDER.reduce((populationUsed, buildingType) => {
+    const level = buildingLevels[buildingType] ?? 0
+    if (level <= 0) {
+      return populationUsed
+    }
+
+    return (
+      populationUsed +
+      level * BUILDING_DEFINITIONS[buildingType].populationUsagePerLevel
+    )
+  }, 0)
+
+export const getBuildSlotsUsedForBuildingLevels = (
+  buildingLevels: BuildingLevels,
+): number =>
+  BUILDING_ORDER.reduce((slotsUsed, buildingType) => {
+    const level = buildingLevels[buildingType] ?? 0
+    if (level <= 0 || !doesBuildingTrackConsumeSlot(buildingType)) {
+      return slotsUsed
+    }
+
+    return slotsUsed + 1
+  }, 0)
 
 export const getCountyDefenseFromBuildingLevels = (
   buildingLevels: BuildingLevels,
@@ -460,4 +708,30 @@ export const formatCostLabel = (cost: ResourceDelta): string => {
       return `${cost[resourceKey]} ${resourceName}`
     })
     .join(' + ')
+}
+
+const validateUpgradeCostInvariant = () => {
+  const maxCaps = getMaxStorageCapsAtWarehouseLevel20()
+  const tracksToValidate: UpgradeTrackType[] = ['WAREHOUSE', 'ROADS', ...BUILDING_ORDER]
+
+  tracksToValidate.forEach((trackType) => {
+    for (let level = 1; level <= MAX_TRACK_LEVEL; level += 1) {
+      const cost = getTrackUpgradeCost(trackType, level)
+      const offendingResource = STORABLE_RESOURCE_KEYS.find(
+        (resourceKey) => (cost[resourceKey] ?? 0) > maxCaps[resourceKey],
+      )
+
+      if (!offendingResource) {
+        continue
+      }
+
+      console.warn(
+        `[Economy] Cost invariant violation: ${trackType} L${level} requires ${cost[offendingResource]} ${offendingResource}, max warehouse cap is ${maxCaps[offendingResource]}.`,
+      )
+    }
+  })
+}
+
+if (import.meta.env.DEV) {
+  validateUpgradeCostInvariant()
 }

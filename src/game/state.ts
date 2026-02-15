@@ -2,6 +2,7 @@ import type { MacroOrder } from './orders'
 import {
   createEmptyBuildingLevels,
   getCountyDefenseFromBuildingLevels,
+  getPopulationCapForFarmLevel,
   normalizeBuildingLevels,
   type BuildingLevels,
   type ResourceDelta,
@@ -18,6 +19,7 @@ export interface CountyGameState {
   defense: number
   prosperity: number
   roadLevel: number
+  population: number
 }
 
 export interface CountyBuildOrder {
@@ -76,6 +78,8 @@ export interface GameState {
   ownedCountyIds: string[]
   resourcesByKingdomId: Record<string, ResourceStockpile>
   buildQueueByCountyId: Record<string, CountyBuildQueueState>
+  globalBuildQueue: CountyBuildQueueState
+  warehouseLevel: number
   lastTurnReport: TurnReport | null
   fogOfWarEnabled: boolean
   superhighwaysEnabled: boolean
@@ -107,6 +111,7 @@ interface CountyMetadataRecord {
   roadLevel?: unknown
   buildings?: unknown
   defense?: unknown
+  population?: unknown
 }
 
 interface StartCharacterRecord {
@@ -142,14 +147,14 @@ const fetchJson = async <T>(path: string): Promise<T> => {
 }
 
 export const createStartingResources = (): ResourceStockpile => ({
-  gold: 240,
-  population: 6200,
+  gold: 350,
+  population: 0,
   wood: 180,
-  stone: 130,
-  iron: 85,
-  wool: 120,
-  leather: 95,
-  horses: 36,
+  stone: 60,
+  iron: 20,
+  wool: 25,
+  leather: 15,
+  horses: 6,
 })
 
 export const createEmptyCountyBuildQueue = (): CountyBuildQueueState => ({
@@ -190,11 +195,22 @@ const parseCountyState = (payload: unknown): Record<string, CountyGameState> => 
         county.buildings === undefined
           ? createEmptyBuildingLevels()
           : normalizeBuildingLevels(county.buildings)
+      if (buildingLevels.FARM < 1) {
+        buildingLevels.FARM = 1
+      }
+
       const derivedDefense = getCountyDefenseFromBuildingLevels(buildingLevels)
       const defenseFromPayload =
         typeof county.defense === 'number' && Number.isFinite(county.defense)
           ? Math.max(0, Math.floor(county.defense))
           : 0
+
+      const populationCap = getPopulationCapForFarmLevel(buildingLevels.FARM)
+      const estimatedPopulation = Math.round(90 + Math.max(0, prosperity) * 12)
+      const populationFromPayload =
+        typeof county.population === 'number' && Number.isFinite(county.population)
+          ? Math.max(0, Math.floor(county.population))
+          : estimatedPopulation
 
       counties[countyId] = {
         id: countyId,
@@ -203,6 +219,7 @@ const parseCountyState = (payload: unknown): Record<string, CountyGameState> => 
         defense: Math.max(derivedDefense, defenseFromPayload),
         prosperity,
         roadLevel: 0,
+        population: Math.min(populationFromPayload, populationCap),
       }
     },
   )
@@ -314,6 +331,8 @@ export const createInitialGameState = async (): Promise<GameState> => {
     ownedCountyIds: [],
     resourcesByKingdomId,
     buildQueueByCountyId: {},
+    globalBuildQueue: createEmptyCountyBuildQueue(),
+    warehouseLevel: 0,
     lastTurnReport: null,
     fogOfWarEnabled: true,
     superhighwaysEnabled: false,
