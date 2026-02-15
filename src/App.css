@@ -208,6 +208,7 @@
   stroke: rgba(239, 223, 185, 0.54);
   stroke-width: 0.8;
   vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 3px rgba(7, 12, 14, 0.26));
 }
 
 .marker-chip-port {
@@ -220,55 +221,17 @@
   stroke: rgba(224, 214, 185, 0.52);
 }
 
-.marker-glyph {
-  fill: none;
-  stroke: #f0e3c0;
-  stroke-width: 0.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
+.marker-icon {
+  color: #efe1bf;
 }
 
-.marker-glyph-port {
-  stroke: #d2e7f3;
-}
-
-.marker-glyph-fort {
-  fill: rgba(242, 206, 158, 0.9);
-  stroke: rgba(66, 45, 31, 0.88);
-}
-
-.marker-glyph-fort .marker-glyph-cutout {
-  fill: rgba(28, 20, 14, 0.72);
-  stroke: none;
-}
-
-.marker-glyph-market {
-  fill: rgba(230, 201, 145, 0.88);
-  stroke: rgba(63, 45, 29, 0.84);
-}
-
-.marker-glyph-farm {
-  stroke: rgba(219, 235, 186, 0.94);
-}
-
-.marker-glyph-lumber {
-  fill: rgba(192, 139, 103, 0.9);
-  stroke: rgba(70, 43, 28, 0.86);
-}
-
-.marker-glyph-mine {
-  stroke: rgba(196, 211, 220, 0.92);
-}
-
-.marker-glyph-quarry {
-  fill: rgba(186, 194, 200, 0.88);
-  stroke: rgba(66, 74, 82, 0.9);
+.marker-icon-port {
+  color: #d2e7f3;
 }
 
 .county-marker-overflow text {
   fill: #ece0bc;
-  font-size: 2.8px;
+  font-size: 3px;
   font-weight: 700;
   letter-spacing: 0.01em;
   paint-order: stroke;
@@ -1629,6 +1592,10 @@ button:disabled {
   background: rgba(20, 31, 37, 0.46);
   font-size: 0.86rem;
   flex: 0 0 auto;
+}
+
+.upgrade-card-icon .building-icon {
+  color: #f0e3c2;
 }
 
 .upgrade-card-copy {

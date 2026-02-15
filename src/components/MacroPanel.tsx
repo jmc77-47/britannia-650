@@ -9,6 +9,7 @@ import {
 } from '../game/buildings'
 import { getNonZeroResourceDeltaEntries } from '../game/economy'
 import type { CountyBuildOrder } from '../game/state'
+import { BuildingIcon } from '../ui/icons/buildings'
 
 export interface MacroPanelCounty {
   id: string
@@ -108,21 +109,6 @@ const STORAGE_CAP_ORDER: { key: StorableResourceKey; label: string }[] = [
   { key: 'leather', label: 'Leather' },
   { key: 'horses', label: 'Horses' },
 ]
-
-const TRACK_ICON_BY_TYPE: Record<UpgradeTrackType, string> = {
-  FARM: '🌾',
-  HOMESTEADS: '🏠',
-  LUMBER_CAMP: '🪵',
-  QUARRY: '🧱',
-  MINE: '⛏️',
-  PASTURE: '🐎',
-  TANNERY: '🧴',
-  WEAVERY: '🧶',
-  MARKET: '🏛️',
-  PALISADE: '🛡️',
-  ROADS: '🛣️',
-  WAREHOUSE: '📦',
-}
 
 const CATEGORY_GROUPS: Array<{ title: string; tracks: UpgradeTrackType[] }> = [
   { title: 'Growth', tracks: ['FARM', 'HOMESTEADS'] },
@@ -371,7 +357,7 @@ export function MacroPanel({
       <li className="upgrade-card" key={`track-card-${track.trackType}-${badgeText ?? 'all'}`}>
         <div className="upgrade-card-main">
           <div className="upgrade-card-icon" aria-hidden="true">
-            {TRACK_ICON_BY_TYPE[track.trackType]}
+            <BuildingIcon type={track.trackType} variant="menu" />
           </div>
           <div className="upgrade-card-copy">
             <p className="upgrade-card-title">
@@ -420,7 +406,7 @@ export function MacroPanel({
       <li className="upgrade-card" key={`warehouse-card-${badgeText ?? 'base'}`}>
         <div className="upgrade-card-main">
           <div className="upgrade-card-icon" aria-hidden="true">
-            {TRACK_ICON_BY_TYPE.WAREHOUSE}
+            <BuildingIcon type="WAREHOUSE" variant="menu" />
           </div>
           <div className="upgrade-card-copy">
             <p className="upgrade-card-title">
