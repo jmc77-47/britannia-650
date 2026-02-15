@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
 } from 'react'
+import { createPortal } from 'react-dom'
 
 interface ModalProps {
   open: boolean
@@ -116,20 +117,23 @@ export const Modal = ({
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [onClose, open])
 
-  return (
+  if (!open) {
+    return null
+  }
+
+  return createPortal(
     <div
-      className={`modal-overlay${open ? ' is-open' : ' is-closed'}`}
+      className="modal-overlay is-open"
       onMouseDown={(event) => {
-        if (open && event.target === event.currentTarget) {
+        if (event.target === event.currentTarget) {
           onClose()
         }
       }}
     >
       <div
-        aria-hidden={!open}
         aria-labelledby={labelledBy}
         aria-modal="true"
-        className={`modal-surface${open ? ' is-open' : ' is-closed'}`}
+        className="modal-surface is-open"
         onMouseDown={(event) => event.stopPropagation()}
         ref={panelRef}
         role="dialog"
@@ -137,6 +141,7 @@ export const Modal = ({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

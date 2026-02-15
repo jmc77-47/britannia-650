@@ -16,11 +16,17 @@ import {
 import { Modal } from './components/Modal'
 import './App.css'
 
-const TOPOLOGY_PATH = '/data/counties_gb_s05.topo.json'
-const KINGDOMS_PATH = '/data/kingdoms.json'
-const COUNTY_METADATA_PATH = '/data/county_metadata.json'
-const DEEPWATER_PORTS_PATH = '/data/deepwater_ports.json'
-const STARTS_PATH = '/data/starts.json'
+const normalizeBasePath = (basePath: string): string =>
+  basePath.endsWith('/') ? basePath : `${basePath}/`
+
+const DATA_BASE_PATH = `${normalizeBasePath(import.meta.env.BASE_URL)}data`
+const dataPath = (fileName: string) => `${DATA_BASE_PATH}/${fileName}`
+
+const TOPOLOGY_PATH = dataPath('counties_gb_s05.topo.json')
+const KINGDOMS_PATH = dataPath('kingdoms.json')
+const COUNTY_METADATA_PATH = dataPath('county_metadata.json')
+const DEEPWATER_PORTS_PATH = dataPath('deepwater_ports.json')
+const STARTS_PATH = dataPath('starts.json')
 const START_STORAGE_KEY = 'britannia:start-id'
 const COUNTY_DEVELOPMENT_STORAGE_KEY = 'britannia:county-development-v1'
 const SUPERHIGHWAYS_STORAGE_KEY = 'britannia:superhighways-enabled'
@@ -2843,8 +2849,18 @@ function App() {
                 )
               })}
             </div>
+            {starts.length === 0 && (
+              <p className="subtle">
+                No starting characters loaded. Check{' '}
+                <code>{STARTS_PATH}</code>.
+              </p>
+            )}
             <div className="start-actions">
-              <button onClick={beginWithStart} type="button">
+              <button
+                disabled={starts.length === 0}
+                onClick={beginWithStart}
+                type="button"
+              >
                 Begin
               </button>
             </div>
