@@ -1,11 +1,14 @@
 import type { MacroOrder } from './orders'
+import type { BuildingType } from './buildings'
+import { assetUrl } from '../lib/assetUrl'
 
 export type GamePhase = 'setup' | 'playing'
 
 export interface CountyGameState {
   id: string
   name: string
-  buildings: string[]
+  buildings: BuildingType[]
+  defense: number
   prosperity: number
   roadLevel: number
 }
@@ -45,6 +48,7 @@ export interface GameState {
   playerFactionColor: string | null
   ownedCountyIds: string[]
   resourcesByKingdomId: Record<string, ResourceStockpile>
+  buildQueueByCountyId: Record<string, BuildingType[]>
   fogOfWarEnabled: boolean
   superhighwaysEnabled: boolean
   discoveredCountyIds: string[]
@@ -95,16 +99,8 @@ interface KingdomsPayload {
   kingdoms?: unknown
 }
 
-const normalizeBaseUrl = (baseUrl: string): string =>
-  baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
-
 export const normalizeCountyId = (countyId: string | null | undefined): string =>
   countyId?.trim().toUpperCase() ?? ''
-
-export const assetUrl =
-  (baseUrl: string) =>
-  (path: string): string =>
-    `${normalizeBaseUrl(baseUrl)}${path.replace(/^\/+/, '')}`
 
 const fetchJson = async <T>(path: string): Promise<T> => {
   const response = await fetch(path)
@@ -167,6 +163,7 @@ const parseCountyState = (payload: unknown): Record<string, CountyGameState> => 
         id: countyId,
         name: countyName,
         buildings: [],
+        defense: 0,
         prosperity,
         roadLevel: clampInteger(roadLevelRaw, 0, 5),
       }
@@ -279,6 +276,7 @@ export const createInitialGameState = async (): Promise<GameState> => {
     playerFactionColor: null,
     ownedCountyIds: [],
     resourcesByKingdomId,
+    buildQueueByCountyId: {},
     fogOfWarEnabled: true,
     superhighwaysEnabled: false,
     discoveredCountyIds: [],

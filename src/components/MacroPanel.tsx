@@ -1,3 +1,5 @@
+import { BUILDING_DEFINITIONS, BUILDING_ORDER, type BuildingType } from '../game/buildings'
+
 export type MacroPanelTab = 'BUILD' | 'TROOPS' | 'RESEARCH' | 'POLICIES'
 
 export interface MacroPanelCounty {
@@ -8,8 +10,16 @@ export interface MacroPanelCounty {
 interface MacroPanelProps {
   turnNumber: number
   selectedCounty: MacroPanelCounty | null
+  selectedCountyOwned: boolean
+  selectedCountyBuildings: BuildingType[]
+  selectedCountyDefense: number
+  queuedBuildings: BuildingType[]
+  canQueueByBuilding: Record<BuildingType, boolean>
+  buildingCostLabels: Record<BuildingType, string>
   activeTab: MacroPanelTab
   onTabChange: (tab: MacroPanelTab) => void
+  onQueueBuild: (buildingType: BuildingType) => void
+  onRemoveQueuedBuild: (queueIndex: number) => void
   onEndTurn: () => void
 }
 
@@ -21,7 +31,7 @@ const PANEL_TABS: { id: MacroPanelTab; label: string }[] = [
 ]
 
 const STUB_COPY: Record<MacroPanelTab, string> = {
-  BUILD: 'Construction queue integration lands in Milestone 2.',
+  BUILD: 'County development orders resolve at End Turn.',
   TROOPS: 'Troop muster and movement orders will plug in next.',
   RESEARCH: 'Realm research trees are scaffolded for a later milestone.',
   POLICIES: 'Policy toggles and realm laws are planned for later.',
@@ -30,10 +40,21 @@ const STUB_COPY: Record<MacroPanelTab, string> = {
 export function MacroPanel({
   turnNumber,
   selectedCounty,
+  selectedCountyOwned,
+  selectedCountyBuildings,
+  selectedCountyDefense,
+  queuedBuildings,
+  canQueueByBuilding,
+  buildingCostLabels,
   activeTab,
   onTabChange,
+  onQueueBuild,
+  onRemoveQueuedBuild,
   onEndTurn,
 }: MacroPanelProps) {
+  const hasSelectedCounty = selectedCounty !== null
+  const uniqueBuildingTypes = [...new Set(selectedCountyBuildings)]
+
   return (
     <aside className="HudPanel MacroPanel" aria-label="Macro controls">
       <section className="drawer-section macro-panel-header">
@@ -74,6 +95,97 @@ export function MacroPanel({
           <p className="subtle">{STUB_COPY[activeTab]}</p>
         </div>
       </section>
+
+      {hasSelectedCounty && (
+        <section className="drawer-section development-section">
+          <div className="development-header">
+            <h3>Development</h3>
+            <span
+              className={`ownership-pill${selectedCountyOwned ? ' is-owned' : ' is-foreign'}`}
+            >
+              {selectedCountyOwned ? 'Owned' : 'Not owned'}
+            </span>
+          </div>
+
+          <div className="development-tags">
+            {uniqueBuildingTypes.length > 0 ? (
+              uniqueBuildingTypes.map((buildingType) => (
+                <span className="building-tag" key={`building-tag-${buildingType}`}>
+                  {BUILDING_DEFINITIONS[buildingType].badge}
+                </span>
+              ))
+            ) : (
+              <span className="building-tag is-empty">No county upgrades yet</span>
+            )}
+            {selectedCountyDefense > 0 && (
+              <span className="building-tag is-defense">Defense +{selectedCountyDefense}</span>
+            )}
+          </div>
+
+          <div className="development-block">
+            <p className="development-subheading">Current buildings</p>
+            {selectedCountyBuildings.length > 0 ? (
+              <ul className="building-list">
+                {selectedCountyBuildings.map((buildingType, index) => (
+                  <li className="building-list-item" key={`${buildingType}-${index}`}>
+                    <span className="building-list-name">
+                      {BUILDING_DEFINITIONS[buildingType].label}
+                    </span>
+                    <span className="building-list-badge">
+                      {BUILDING_DEFINITIONS[buildingType].badge}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="queue-empty">No completed buildings in this county.</p>
+            )}
+          </div>
+
+          <div className="development-block">
+            <p className="development-subheading">Queue construction</p>
+            <div className="build-button-list">
+              {BUILDING_ORDER.map((buildingType) => (
+                <button
+                  className="secondary-button build-action-button"
+                  disabled={!selectedCountyOwned || !canQueueByBuilding[buildingType]}
+                  key={buildingType}
+                  onClick={() => onQueueBuild(buildingType)}
+                  type="button"
+                >
+                  <span>{BUILDING_DEFINITIONS[buildingType].label}</span>
+                  <small>{buildingCostLabels[buildingType]}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="development-block">
+            <p className="development-subheading">Queued this turn</p>
+            {queuedBuildings.length > 0 ? (
+              <ul className="queue-list">
+                {queuedBuildings.map((buildingType, queueIndex) => (
+                  <li className="queue-item" key={`${buildingType}-queue-${queueIndex}`}>
+                    <div>
+                      <strong>{BUILDING_DEFINITIONS[buildingType].label}</strong>
+                      <span>{BUILDING_DEFINITIONS[buildingType].badge}</span>
+                    </div>
+                    <button
+                      className="secondary-button queue-remove-button"
+                      onClick={() => onRemoveQueuedBuild(queueIndex)}
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="queue-empty">No build orders queued for this county.</p>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="drawer-section macro-panel-actions">
         <button className="macro-end-turn-button" onClick={onEndTurn} type="button">

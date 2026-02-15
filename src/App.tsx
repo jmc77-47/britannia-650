@@ -19,15 +19,23 @@ import { MacroPanel, type MacroPanelTab } from './components/MacroPanel'
 import { Modal } from './components/Modal'
 import { gameReducer } from './game/reducer'
 import {
+  BUILDING_DEFINITIONS,
+  BUILDING_ORDER,
+  canQueueBuilding,
+  createZeroResources,
+  formatCostLabel,
+  type BuildingType,
+} from './game/buildings'
+import {
   CanvasRoadLayer,
   type RoadRenderModel,
 } from './map/CanvasRoadLayer'
 import {
-  assetUrl,
   createInitialGameState,
   type GameState,
   type ResourceStockpile,
 } from './game/state'
+import { assetUrl } from './lib/assetUrl'
 import './App.css'
 
 const TOPOLOGY_PATH = 'data/counties_gb_s05.topo.json'
@@ -40,16 +48,7 @@ const COUNTY_HOVER_FILL = '#738260'
 const COUNTY_SELECTED_FILL = '#d8ba66'
 const PLAYER_FACTION_FALLBACK_FILL = '#79c5f0'
 const FOGGED_COUNTY_FILL = '#1a2328'
-const EMPTY_RESOURCE_STOCKPILE: ResourceStockpile = {
-  gold: 0,
-  population: 0,
-  wood: 0,
-  stone: 0,
-  iron: 0,
-  wool: 0,
-  leather: 0,
-  horses: 0,
-}
+const EMPTY_RESOURCE_STOCKPILE: ResourceStockpile = createZeroResources()
 const RESOURCE_RIBBON_ITEMS: { key: keyof ResourceStockpile; label: string }[] = [
   { key: 'gold', label: 'Gold' },
   { key: 'population', label: 'Population' },
@@ -528,7 +527,27 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       name: selectedCounty.name,
     }
   }, [selectedCounty])
-
+  const selectedCountyState = useMemo(
+    () =>
+      selectedCountyForPanel
+        ? gameState.counties[selectedCountyForPanel.id] ?? null
+        : null,
+    [gameState.counties, selectedCountyForPanel],
+  )
+  const selectedCountyQueue = useMemo(
+    () =>
+      selectedCountyForPanel
+        ? gameState.buildQueueByCountyId[selectedCountyForPanel.id] ?? []
+        : [],
+    [gameState.buildQueueByCountyId, selectedCountyForPanel],
+  )
+  const selectedCountyOwned = useMemo(
+    () =>
+      selectedCountyForPanel
+        ? ownedCountyIdSet.has(selectedCountyForPanel.id)
+        : false,
+    [ownedCountyIdSet, selectedCountyForPanel],
+  )
   const selectedCharacter = useMemo(
     () =>
       gameState.selectedCharacterId
@@ -548,6 +567,23 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       gameState.resourcesByKingdomId[playerFactionId] ?? EMPTY_RESOURCE_STOCKPILE
     )
   }, [gameState.playerFactionId, gameState.resourcesByKingdomId])
+  const canQueueByBuilding = useMemo<Record<BuildingType, boolean>>(
+    () => ({
+      HOMESTEADS:
+        !!selectedCountyForPanel &&
+        selectedCountyOwned &&
+        canQueueBuilding(selectedCountyQueue, 'HOMESTEADS', playerResources),
+      LUMBER_CAMP:
+        !!selectedCountyForPanel &&
+        selectedCountyOwned &&
+        canQueueBuilding(selectedCountyQueue, 'LUMBER_CAMP', playerResources),
+      PALISADE:
+        !!selectedCountyForPanel &&
+        selectedCountyOwned &&
+        canQueueBuilding(selectedCountyQueue, 'PALISADE', playerResources),
+    }),
+    [playerResources, selectedCountyForPanel, selectedCountyOwned, selectedCountyQueue],
+  )
 
   const kingdomByCountyId = useMemo(() => {
     const map = new Map<
@@ -951,6 +987,49 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     setSetupCharacterId(gameState.availableCharacters[0]?.id ?? null)
     dispatch({ type: 'OPEN_SETUP' })
   }, [gameState.availableCharacters])
+  const queueBuildingForSelectedCounty = useCallback(
+    (buildingType: BuildingType) => {
+      if (!selectedCountyForPanel) {
+        return
+      }
+
+      dispatch({
+        type: 'QUEUE_BUILD',
+        countyId: selectedCountyForPanel.id,
+        buildingType,
+      })
+    },
+    [selectedCountyForPanel],
+  )
+  const removeQueuedBuildingForSelectedCounty = useCallback(
+    (queueIndex: number) => {
+      if (!selectedCountyForPanel) {
+        return
+      }
+
+      dispatch({
+        type: 'REMOVE_QUEUED_BUILD',
+        countyId: selectedCountyForPanel.id,
+        queueIndex,
+      })
+    },
+    [selectedCountyForPanel],
+  )
+  const selectedCountyBuildingCostLabels = useMemo(
+    () =>
+      BUILDING_ORDER.reduce<Record<BuildingType, string>>(
+        (labels, buildingType) => ({
+          ...labels,
+          [buildingType]: formatCostLabel(BUILDING_DEFINITIONS[buildingType].cost),
+        }),
+        {
+          HOMESTEADS: '',
+          LUMBER_CAMP: '',
+          PALISADE: '',
+        },
+      ),
+    [],
+  )
 
   return (
     <div className={`MacroRoot${isDragging ? ' is-map-dragging' : ''}`}>
@@ -1112,6 +1191,24 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
               </g>
             )}
 
+            {gameState.gamePhase === 'playing' && (
+              <g className="fortified-county-layer">
+                {projectedMap.counties
+                  .filter((county) => {
+                    if (!isCountyVisible(county.id)) {
+                      return false
+                    }
+                    return gameState.counties[county.id]?.buildings.includes('PALISADE')
+                  })
+                  .map((county) => (
+                    <g key={`fortified-county-${county.id}`}>
+                      <path className="fortified-county-glow" d={county.d} />
+                      <path className="fortified-county-outline" d={county.d} />
+                    </g>
+                  ))}
+              </g>
+            )}
+
             {projectedMap.borderPath && (
               <g className="borders-layer">
                 <path className="borders-path" d={projectedMap.borderPath} />
@@ -1230,7 +1327,15 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         <MacroPanel
           activeTab={activeTab}
           onEndTurn={() => dispatch({ type: 'END_TURN' })}
+          onQueueBuild={queueBuildingForSelectedCounty}
+          onRemoveQueuedBuild={removeQueuedBuildingForSelectedCounty}
           onTabChange={setActiveTab}
+          canQueueByBuilding={canQueueByBuilding}
+          buildingCostLabels={selectedCountyBuildingCostLabels}
+          queuedBuildings={selectedCountyQueue}
+          selectedCountyBuildings={selectedCountyState?.buildings ?? []}
+          selectedCountyDefense={selectedCountyState?.defense ?? 0}
+          selectedCountyOwned={selectedCountyOwned}
           selectedCounty={selectedCountyForPanel}
           turnNumber={gameState.turnNumber}
         />

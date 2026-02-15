@@ -1,5 +1,9 @@
 import { resolveTurn } from './resolveTurn'
 import {
+  canQueueBuilding,
+  type BuildingType,
+} from './buildings'
+import {
   createStartingResources,
   normalizeCountyId,
   type GameState,
@@ -27,6 +31,16 @@ export type GameAction =
   | {
       type: 'TOGGLE_SUPERHIGHWAYS'
     }
+  | {
+      type: 'QUEUE_BUILD'
+      countyId: string
+      buildingType: BuildingType
+    }
+  | {
+      type: 'REMOVE_QUEUED_BUILD'
+      countyId: string
+      queueIndex: number
+    }
 
 const normalizeCountyIdList = (countyIds: string[]): string[] => {
   const uniqueCountyIds = new Set<string>()
@@ -53,6 +67,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionName: null,
       playerFactionColor: null,
       ownedCountyIds: [],
+      buildQueueByCountyId: {},
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
       discoveredCountyIds: [],
@@ -101,6 +116,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       playerFactionColor: kingdom?.color ?? '#f3c94b',
       ownedCountyIds,
       resourcesByKingdomId,
+      buildQueueByCountyId: {},
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
       discoveredCountyIds,
@@ -147,6 +163,69 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     }
 
     return resolveTurn(state)
+  }
+
+  if (action.type === 'QUEUE_BUILD') {
+    if (state.gamePhase !== 'playing') {
+      return state
+    }
+
+    const countyId = normalizeCountyId(action.countyId)
+    if (!countyId || !state.counties[countyId] || !state.ownedCountyIds.includes(countyId)) {
+      return state
+    }
+
+    const playerFactionId = state.playerFactionId
+    if (!playerFactionId) {
+      return state
+    }
+
+    const playerResources = state.resourcesByKingdomId[playerFactionId]
+    if (!playerResources) {
+      return state
+    }
+
+    const existingQueue = state.buildQueueByCountyId[countyId] ?? []
+    if (!canQueueBuilding(existingQueue, action.buildingType, playerResources)) {
+      return state
+    }
+
+    return {
+      ...state,
+      buildQueueByCountyId: {
+        ...state.buildQueueByCountyId,
+        [countyId]: [...existingQueue, action.buildingType],
+      },
+    }
+  }
+
+  if (action.type === 'REMOVE_QUEUED_BUILD') {
+    if (state.gamePhase !== 'playing') {
+      return state
+    }
+
+    const countyId = normalizeCountyId(action.countyId)
+    const existingQueue = state.buildQueueByCountyId[countyId]
+    if (!countyId || !existingQueue || action.queueIndex < 0 || action.queueIndex >= existingQueue.length) {
+      return state
+    }
+
+    const nextQueue = existingQueue.filter((_, index) => index !== action.queueIndex)
+    if (nextQueue.length === 0) {
+      const { [countyId]: _removedQueue, ...remainingQueues } = state.buildQueueByCountyId
+      return {
+        ...state,
+        buildQueueByCountyId: remainingQueues,
+      }
+    }
+
+    return {
+      ...state,
+      buildQueueByCountyId: {
+        ...state.buildQueueByCountyId,
+        [countyId]: nextQueue,
+      },
+    }
   }
 
   return state
