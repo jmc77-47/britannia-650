@@ -279,25 +279,48 @@
   font-size: clamp(1.28rem, 2.5vw, 1.8rem);
 }
 
-.macro-banner-actions {
-  margin-top: 0.58rem;
+.MacroRibbon {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  right: calc(min(24rem, calc(100vw - 2rem)) + 1.85rem);
+  z-index: 33;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.65rem;
+  padding: 0.56rem 0.66rem;
+  pointer-events: none;
+  animation: hud-fade-up 320ms ease;
+}
+
+.macro-ribbon-main {
+  min-width: 12rem;
+  max-width: 18rem;
+}
+
+.macro-ribbon-context {
+  margin-top: 0.2rem;
+  font-size: 0.84rem;
+  line-height: 1.34;
+}
+
+.macro-ribbon-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.46rem;
+  margin-left: auto;
+  pointer-events: none;
+}
+
+.macro-ribbon-actions > button {
+  pointer-events: auto;
 }
 
 .macro-new-game-button {
-  min-width: 7rem;
-  padding-top: 0.44rem;
-  padding-bottom: 0.44rem;
-  font-size: 0.82rem;
-}
-
-.macro-settings-button {
-  min-width: 7.4rem;
-  padding-top: 0.44rem;
-  padding-bottom: 0.44rem;
-  font-size: 0.82rem;
+  min-width: 6.9rem;
+  padding-top: 0.42rem;
+  padding-bottom: 0.42rem;
+  font-size: 0.8rem;
 }
 
 .MacroPanel {
@@ -676,9 +699,12 @@ h1 {
   list-style: none;
   display: flex;
   flex-wrap: wrap;
+  flex: 1 1 auto;
   align-content: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 0.42rem;
+  min-width: 0;
+  pointer-events: none;
 }
 
 .resource-pill {
@@ -691,13 +717,13 @@ h1 {
   background: rgba(14, 26, 30, 0.75);
   color: #f1e7c8;
   font-size: 0.79rem;
-  cursor: help;
-  transition: border-color 130ms ease, transform 130ms ease;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
-.resource-pill:hover {
-  border-color: rgba(245, 228, 185, 0.45);
-  transform: translateY(-1px);
+.resource-pill-turn {
+  border-color: rgba(242, 227, 180, 0.48);
+  background: linear-gradient(180deg, rgba(114, 86, 40, 0.56), rgba(73, 56, 28, 0.55));
 }
 
 .resource-pill-label {
@@ -1394,6 +1420,28 @@ button:disabled {
   .MacroBanner {
     right: 0.75rem;
     width: auto;
+  }
+
+  .MacroRibbon {
+    top: 0.75rem;
+    left: 0.75rem;
+    right: 0.75rem;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .macro-ribbon-main {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .macro-ribbon-actions {
+    margin-left: 0;
+  }
+
+  .resource-ribbon {
+    width: 100%;
   }
 
   .MacroPanel {

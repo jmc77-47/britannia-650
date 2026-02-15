@@ -1,5 +1,9 @@
 import { resolveTurn } from './resolveTurn'
-import { normalizeCountyId, type GameState } from './state'
+import {
+  createStartingResources,
+  normalizeCountyId,
+  type GameState,
+} from './state'
 
 export type GameAction =
   | {
@@ -68,11 +72,16 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     const kingdom = state.kingdoms.find((candidateKingdom) =>
       candidateKingdom.countyIds.includes(startingCountyId),
     )
+    const playerFactionId = kingdom?.id ?? `player-${selectedCharacter.id}`
     const ownedCountyIds = kingdom
       ? kingdom.countyIds
       : startingCountyId
         ? [startingCountyId]
         : []
+    const resourcesByKingdomId = {
+      ...state.resourcesByKingdomId,
+      [playerFactionId]: createStartingResources(),
+    }
     const discoveredCountyIds = normalizeCountyIdList(
       action.discoveredCountyIds ?? [startingCountyId],
     )
@@ -87,10 +96,11 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       selectedCharacterId: selectedCharacter.id,
       startingCountyId: startingCountyId || null,
       selectedCountyId: startingCountyId || null,
-      playerFactionId: kingdom?.id ?? null,
+      playerFactionId,
       playerFactionName: kingdom?.name ?? `${selectedCharacter.name}'s Realm`,
       playerFactionColor: kingdom?.color ?? '#f3c94b',
       ownedCountyIds,
+      resourcesByKingdomId,
       fogOfWarEnabled: true,
       superhighwaysEnabled: state.superhighwaysEnabled,
       discoveredCountyIds,

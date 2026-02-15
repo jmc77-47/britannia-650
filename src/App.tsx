@@ -26,6 +26,7 @@ import {
   assetUrl,
   createInitialGameState,
   type GameState,
+  type ResourceStockpile,
 } from './game/state'
 import './App.css'
 
@@ -39,6 +40,26 @@ const COUNTY_HOVER_FILL = '#738260'
 const COUNTY_SELECTED_FILL = '#d8ba66'
 const PLAYER_FACTION_FALLBACK_FILL = '#79c5f0'
 const FOGGED_COUNTY_FILL = '#1a2328'
+const EMPTY_RESOURCE_STOCKPILE: ResourceStockpile = {
+  gold: 0,
+  population: 0,
+  wood: 0,
+  stone: 0,
+  iron: 0,
+  wool: 0,
+  leather: 0,
+  horses: 0,
+}
+const RESOURCE_RIBBON_ITEMS: { key: keyof ResourceStockpile; label: string }[] = [
+  { key: 'gold', label: 'Gold' },
+  { key: 'population', label: 'Population' },
+  { key: 'wood', label: 'Wood' },
+  { key: 'stone', label: 'Stone' },
+  { key: 'iron', label: 'Iron' },
+  { key: 'wool', label: 'Wool' },
+  { key: 'leather', label: 'Leather' },
+  { key: 'horses', label: 'Horses' },
+]
 
 interface CountyTopologyProperties {
   NAME?: string
@@ -245,6 +266,9 @@ const getErrorMessage = (error: unknown): string => {
   }
   return 'Unknown error while loading macro map data.'
 }
+
+const formatResourceValue = (value: number): string =>
+  new Intl.NumberFormat('en-US').format(Math.max(0, Math.round(value)))
 
 const fetchJson = async <T,>(path: string): Promise<T> => {
   const response = await fetch(path)
@@ -514,6 +538,16 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         : null,
     [gameState.availableCharacters, gameState.selectedCharacterId],
   )
+  const playerResources = useMemo<ResourceStockpile>(() => {
+    const playerFactionId = gameState.playerFactionId
+    if (!playerFactionId) {
+      return EMPTY_RESOURCE_STOCKPILE
+    }
+
+    return (
+      gameState.resourcesByKingdomId[playerFactionId] ?? EMPTY_RESOURCE_STOCKPILE
+    )
+  }, [gameState.playerFactionId, gameState.resourcesByKingdomId])
 
   const kingdomByCountyId = useMemo(() => {
     const map = new Map<
@@ -1136,29 +1170,38 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         )}
       </div>
 
-      <header className="HudPanel MacroBanner">
-        <p className="hud-eyebrow">Dark Ages 650 AD</p>
-        <h1>{isSetupPhase ? 'Choose Your Character' : 'Macro Campaign'}</h1>
-        {isSetupPhase ? (
+      {isSetupPhase ? (
+        <header className="HudPanel MacroBanner">
+          <p className="hud-eyebrow">Dark Ages 650 AD</p>
+          <h1>Choose Your Character</h1>
           <p className="subtle">
             Select Alphonsus, Douglas, Edmund, or Ulmann to begin your campaign.
           </p>
-        ) : (
-          <p className="subtle">
-            Character: <strong>{selectedCharacter?.name ?? 'Unknown'}</strong> | Faction:{' '}
-            <strong>{gameState.playerFactionName ?? 'Unknown banner'}</strong>
-          </p>
-        )}
-        {!isSetupPhase && (
-          <div className="macro-banner-actions">
-            <button
-              className="secondary-button macro-settings-button"
-              onClick={() => setSettingsOpen(true)}
-              ref={settingsButtonRef}
-              type="button"
-            >
-              Settings
-            </button>
+        </header>
+      ) : (
+        <header aria-label="Top resource ribbon" className="HudPanel MacroRibbon">
+          <div className="macro-ribbon-main">
+            <p className="hud-eyebrow">Dark Ages 650 AD</p>
+            <p className="macro-ribbon-context subtle">
+              Character: <strong>{selectedCharacter?.name ?? 'Unknown'}</strong> | Faction:{' '}
+              <strong>{gameState.playerFactionName ?? 'Unknown banner'}</strong>
+            </p>
+          </div>
+
+          <ul aria-label="Current resources" className="resource-ribbon">
+            <li className="resource-pill resource-pill-turn" title="Current turn">
+              <span className="resource-pill-label">Turn</span>
+              <strong>{formatResourceValue(gameState.turnNumber)}</strong>
+            </li>
+            {RESOURCE_RIBBON_ITEMS.map((resource) => (
+              <li className="resource-pill" key={resource.key} title={resource.label}>
+                <span className="resource-pill-label">{resource.label}</span>
+                <strong>{formatResourceValue(playerResources[resource.key])}</strong>
+              </li>
+            ))}
+          </ul>
+
+          <div className="macro-ribbon-actions">
             <button
               className="secondary-button macro-new-game-button"
               onClick={openSetup}
@@ -1166,9 +1209,22 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
             >
               New Game
             </button>
+            <button
+              aria-label="Open settings"
+              className={`gear-button${settingsOpen ? ' is-active' : ''}`}
+              data-tooltip="Settings"
+              onClick={() => setSettingsOpen(true)}
+              ref={settingsButtonRef}
+              type="button"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="3.6" />
+                <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+              </svg>
+            </button>
           </div>
-        )}
-      </header>
+        </header>
+      )}
 
       {gameState.gamePhase === 'playing' && (
         <MacroPanel

@@ -23,6 +23,17 @@ export interface KingdomGameState {
   countyIds: string[]
 }
 
+export interface ResourceStockpile {
+  gold: number
+  population: number
+  wood: number
+  stone: number
+  iron: number
+  wool: number
+  leather: number
+  horses: number
+}
+
 export interface GameState {
   gamePhase: GamePhase
   turnNumber: number
@@ -33,6 +44,7 @@ export interface GameState {
   playerFactionName: string | null
   playerFactionColor: string | null
   ownedCountyIds: string[]
+  resourcesByKingdomId: Record<string, ResourceStockpile>
   fogOfWarEnabled: boolean
   superhighwaysEnabled: boolean
   discoveredCountyIds: string[]
@@ -105,6 +117,17 @@ const fetchJson = async <T>(path: string): Promise<T> => {
 
 const clampInteger = (value: number, min: number, max: number): number =>
   Math.round(Math.min(max, Math.max(min, value)))
+
+export const createStartingResources = (): ResourceStockpile => ({
+  gold: 240,
+  population: 6200,
+  wood: 180,
+  stone: 130,
+  iron: 85,
+  wool: 120,
+  leather: 95,
+  horses: 36,
+})
 
 const parseCountyState = (payload: unknown): Record<string, CountyGameState> => {
   if (!payload || typeof payload !== 'object') {
@@ -239,6 +262,11 @@ export const createInitialGameState = async (): Promise<GameState> => {
     fetchJson<unknown>(toAssetUrl(STARTS_PATH)),
     fetchJson<unknown>(toAssetUrl(KINGDOMS_PATH)),
   ])
+  const kingdoms = parseKingdoms(kingdomsPayload)
+  const resourcesByKingdomId: Record<string, ResourceStockpile> = {}
+  kingdoms.forEach((kingdom) => {
+    resourcesByKingdomId[kingdom.id] = createStartingResources()
+  })
 
   return {
     gamePhase: 'setup',
@@ -250,11 +278,12 @@ export const createInitialGameState = async (): Promise<GameState> => {
     playerFactionName: null,
     playerFactionColor: null,
     ownedCountyIds: [],
+    resourcesByKingdomId,
     fogOfWarEnabled: true,
     superhighwaysEnabled: false,
     discoveredCountyIds: [],
     availableCharacters: parseStartCharacters(startsPayload),
-    kingdoms: parseKingdoms(kingdomsPayload),
+    kingdoms,
     counties: parseCountyState(countyMetadata),
     pendingOrders: [],
   }
