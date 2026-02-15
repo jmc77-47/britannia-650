@@ -1,11 +1,19 @@
+import {
+  MAX_TRACK_LEVEL,
+  addResourceDelta,
+  getTrackUpgradeCost,
+  getTrackUpgradeTurns,
+  hasEnoughResources,
+  subtractResourceDelta,
+  type UpgradeTrackType,
+} from './buildings'
 import { resolveTurn } from './resolveTurn'
 import {
-  canQueueBuilding,
-  type BuildingType,
-} from './buildings'
-import {
+  createEmptyCountyBuildQueue,
   createStartingResources,
   normalizeCountyId,
+  type CountyBuildOrder,
+  type CountyBuildQueueState,
   type GameState,
 } from './state'
 
@@ -32,12 +40,12 @@ export type GameAction =
       type: 'TOGGLE_SUPERHIGHWAYS'
     }
   | {
-      type: 'QUEUE_BUILD'
+      type: 'QUEUE_TRACK_UPGRADE'
       countyId: string
-      buildingType: BuildingType
+      trackType: UpgradeTrackType
     }
   | {
-      type: 'REMOVE_QUEUED_BUILD'
+      type: 'REMOVE_QUEUED_BUILD_ORDER'
       countyId: string
       queueIndex: number
     }
@@ -55,6 +63,69 @@ const normalizeCountyIdList = (countyIds: string[]): string[] => {
   })
 
   return [...uniqueCountyIds]
+}
+
+const getTrackLevelInCounty = (
+  countyId: string,
+  trackType: UpgradeTrackType,
+  state: GameState,
+): number => {
+  const county = state.counties[countyId]
+  if (!county) {
+    return 0
+  }
+
+  if (trackType === 'ROADS') {
+    return county.roadLevel
+  }
+
+  return county.buildings[trackType] ?? 0
+}
+
+const getQueuedTrackIncrements = (
+  queueState: CountyBuildQueueState,
+  trackType: UpgradeTrackType,
+): number => {
+  let pendingIncrements = 0
+
+  if (queueState.activeOrder && queueState.activeOrder.trackType === trackType) {
+    pendingIncrements += queueState.activeOrder.targetLevelDelta
+  }
+
+  queueState.queuedOrders.forEach((order) => {
+    if (order.trackType === trackType) {
+      pendingIncrements += order.targetLevelDelta
+    }
+  })
+
+  return pendingIncrements
+}
+
+const getUsedOrderIds = (queueState: CountyBuildQueueState): Set<string> => {
+  const ids = new Set<string>()
+  if (queueState.activeOrder) {
+    ids.add(queueState.activeOrder.id)
+  }
+  queueState.queuedOrders.forEach((order) => ids.add(order.id))
+  return ids
+}
+
+const createBuildOrderId = (
+  countyId: string,
+  trackType: UpgradeTrackType,
+  turnNumber: number,
+  queueState: CountyBuildQueueState,
+): string => {
+  const usedIds = getUsedOrderIds(queueState)
+  let sequence = usedIds.size + 1
+  let candidate = `${countyId}-${trackType}-${turnNumber}-${sequence}`
+
+  while (usedIds.has(candidate)) {
+    sequence += 1
+    candidate = `${countyId}-${trackType}-${turnNumber}-${sequence}`
+  }
+
+  return candidate
 }
 
 export const gameReducer = (state: GameState, action: GameAction): GameState => {
@@ -97,6 +168,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       : startingCountyId
         ? [startingCountyId]
         : []
+
     const countiesWithOwnedRoadMinimum = { ...state.counties }
     ownedCountyIds.forEach((countyId) => {
       const countyState = state.counties[countyId]
@@ -109,6 +181,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
         roadLevel: 1,
       }
     })
+
     const resourcesByKingdomId = {
       ...state.resourcesByKingdomId,
       [playerFactionId]: createStartingResources(),
@@ -183,7 +256,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     return resolveTurn(state)
   }
 
-  if (action.type === 'QUEUE_BUILD') {
+  if (action.type === 'QUEUE_TRACK_UPGRADE') {
     if (state.gamePhase !== 'playing') {
       return state
     }
@@ -203,46 +276,105 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       return state
     }
 
-    const existingQueue = state.buildQueueByCountyId[countyId] ?? []
-    if (!canQueueBuilding(existingQueue, action.buildingType, playerResources)) {
+    const existingQueueState =
+      state.buildQueueByCountyId[countyId] ?? createEmptyCountyBuildQueue()
+    const currentTrackLevel = getTrackLevelInCounty(countyId, action.trackType, state)
+    const queuedTrackLevels = getQueuedTrackIncrements(existingQueueState, action.trackType)
+    const nextLevel = currentTrackLevel + queuedTrackLevels + 1
+    if (nextLevel > MAX_TRACK_LEVEL) {
       return state
     }
 
+    const turnsRequired = getTrackUpgradeTurns(action.trackType, nextLevel)
+    if (turnsRequired <= 0) {
+      return state
+    }
+
+    const upgradeCost = getTrackUpgradeCost(action.trackType, nextLevel)
+    if (!hasEnoughResources(playerResources, upgradeCost)) {
+      return state
+    }
+
+    const newOrder: CountyBuildOrder = {
+      id: createBuildOrderId(countyId, action.trackType, state.turnNumber, existingQueueState),
+      trackType: action.trackType,
+      targetLevelDelta: 1,
+      turnsRemaining: turnsRequired,
+      cost: upgradeCost,
+      queuedOnTurn: state.turnNumber,
+    }
+
+    const nextQueueState: CountyBuildQueueState = existingQueueState.activeOrder
+      ? {
+          ...existingQueueState,
+          queuedOrders: [...existingQueueState.queuedOrders, newOrder],
+        }
+      : {
+          ...existingQueueState,
+          activeOrder: newOrder,
+        }
+
     return {
       ...state,
+      resourcesByKingdomId: {
+        ...state.resourcesByKingdomId,
+        [playerFactionId]: subtractResourceDelta(playerResources, upgradeCost),
+      },
       buildQueueByCountyId: {
         ...state.buildQueueByCountyId,
-        [countyId]: [...existingQueue, action.buildingType],
+        [countyId]: nextQueueState,
       },
     }
   }
 
-  if (action.type === 'REMOVE_QUEUED_BUILD') {
+  if (action.type === 'REMOVE_QUEUED_BUILD_ORDER') {
     if (state.gamePhase !== 'playing') {
       return state
     }
 
     const countyId = normalizeCountyId(action.countyId)
-    const existingQueue = state.buildQueueByCountyId[countyId]
-    if (!countyId || !existingQueue || action.queueIndex < 0 || action.queueIndex >= existingQueue.length) {
+    const existingQueueState = countyId ? state.buildQueueByCountyId[countyId] : undefined
+    if (!countyId || !existingQueueState) {
       return state
     }
 
-    const nextQueue = existingQueue.filter((_, index) => index !== action.queueIndex)
-    if (nextQueue.length === 0) {
-      const { [countyId]: _removedQueue, ...remainingQueues } = state.buildQueueByCountyId
-      return {
-        ...state,
-        buildQueueByCountyId: remainingQueues,
-      }
+    const queuedOrders = existingQueueState.queuedOrders
+    if (action.queueIndex < 0 || action.queueIndex >= queuedOrders.length) {
+      return state
+    }
+
+    const removedOrder = queuedOrders[action.queueIndex]
+    const nextQueuedOrders = queuedOrders.filter((_, index) => index !== action.queueIndex)
+
+    const playerFactionId = state.playerFactionId
+    if (!playerFactionId) {
+      return state
+    }
+
+    const playerResources = state.resourcesByKingdomId[playerFactionId]
+    if (!playerResources) {
+      return state
+    }
+
+    const nextQueueState: CountyBuildQueueState = {
+      ...existingQueueState,
+      queuedOrders: nextQueuedOrders,
+    }
+
+    const nextBuildQueueByCountyId = { ...state.buildQueueByCountyId }
+    if (!nextQueueState.activeOrder && nextQueueState.queuedOrders.length === 0) {
+      delete nextBuildQueueByCountyId[countyId]
+    } else {
+      nextBuildQueueByCountyId[countyId] = nextQueueState
     }
 
     return {
       ...state,
-      buildQueueByCountyId: {
-        ...state.buildQueueByCountyId,
-        [countyId]: nextQueue,
+      resourcesByKingdomId: {
+        ...state.resourcesByKingdomId,
+        [playerFactionId]: addResourceDelta(playerResources, removedOrder.cost),
       },
+      buildQueueByCountyId: nextBuildQueueByCountyId,
     }
   }
 

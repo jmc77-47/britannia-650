@@ -1,5 +1,12 @@
 import type { MacroOrder } from './orders'
-import type { BuildingType, ResourceDelta } from './buildings'
+import {
+  createEmptyBuildingLevels,
+  getCountyDefenseFromBuildingLevels,
+  normalizeBuildingLevels,
+  type BuildingLevels,
+  type ResourceDelta,
+  type UpgradeTrackType,
+} from './buildings'
 import { assetUrl } from '../lib/assetUrl'
 
 export type GamePhase = 'setup' | 'playing'
@@ -7,10 +14,24 @@ export type GamePhase = 'setup' | 'playing'
 export interface CountyGameState {
   id: string
   name: string
-  buildings: BuildingType[]
+  buildings: BuildingLevels
   defense: number
   prosperity: number
   roadLevel: number
+}
+
+export interface CountyBuildOrder {
+  id: string
+  trackType: UpgradeTrackType
+  targetLevelDelta: 1
+  turnsRemaining: number
+  cost: ResourceDelta
+  queuedOnTurn: number
+}
+
+export interface CountyBuildQueueState {
+  activeOrder: CountyBuildOrder | null
+  queuedOrders: CountyBuildOrder[]
 }
 
 export interface StartCharacter {
@@ -54,7 +75,7 @@ export interface GameState {
   playerFactionColor: string | null
   ownedCountyIds: string[]
   resourcesByKingdomId: Record<string, ResourceStockpile>
-  buildQueueByCountyId: Record<string, BuildingType[]>
+  buildQueueByCountyId: Record<string, CountyBuildQueueState>
   lastTurnReport: TurnReport | null
   fogOfWarEnabled: boolean
   superhighwaysEnabled: boolean
@@ -84,6 +105,8 @@ interface CountyMetadataRecord {
   displayName?: unknown
   prosperityBase?: unknown
   roadLevel?: unknown
+  buildings?: unknown
+  defense?: unknown
 }
 
 interface StartCharacterRecord {
@@ -129,6 +152,11 @@ export const createStartingResources = (): ResourceStockpile => ({
   horses: 36,
 })
 
+export const createEmptyCountyBuildQueue = (): CountyBuildQueueState => ({
+  activeOrder: null,
+  queuedOrders: [],
+})
+
 const parseCountyState = (payload: unknown): Record<string, CountyGameState> => {
   if (!payload || typeof payload !== 'object') {
     return {}
@@ -158,12 +186,21 @@ const parseCountyState = (payload: unknown): Record<string, CountyGameState> => 
         Number.isFinite(county.prosperityBase)
           ? county.prosperityBase
           : 0
+      const buildingLevels =
+        county.buildings === undefined
+          ? createEmptyBuildingLevels()
+          : normalizeBuildingLevels(county.buildings)
+      const derivedDefense = getCountyDefenseFromBuildingLevels(buildingLevels)
+      const defenseFromPayload =
+        typeof county.defense === 'number' && Number.isFinite(county.defense)
+          ? Math.max(0, Math.floor(county.defense))
+          : 0
 
       counties[countyId] = {
         id: countyId,
         name: countyName,
-        buildings: [],
-        defense: 0,
+        buildings: buildingLevels,
+        defense: Math.max(derivedDefense, defenseFromPayload),
         prosperity,
         roadLevel: 0,
       }

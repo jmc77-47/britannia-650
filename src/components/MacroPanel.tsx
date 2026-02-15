@@ -1,10 +1,14 @@
 import {
   BUILDING_DEFINITIONS,
   BUILDING_ORDER,
+  MAX_TRACK_LEVEL,
+  TRACK_LABEL_BY_ID,
   type BuildingType,
   type ResourceDelta,
+  type UpgradeTrackType,
 } from '../game/buildings'
 import { getNonZeroResourceDeltaEntries } from '../game/economy'
+import type { CountyBuildOrder } from '../game/state'
 
 export type MacroPanelTab = 'BUILD' | 'TROOPS' | 'RESEARCH' | 'POLICIES'
 
@@ -13,21 +17,32 @@ export interface MacroPanelCounty {
   name: string
 }
 
+export interface TrackUpgradeOption {
+  trackType: UpgradeTrackType
+  label: string
+  level: number
+  turnsRequired: number
+  yieldLabel: string
+  costLabel: string
+  canUpgrade: boolean
+}
+
 interface MacroPanelProps {
   turnNumber: number
   selectedCounty: MacroPanelCounty | null
   selectedCountyOwned: boolean
-  selectedCountyBuildings: BuildingType[]
+  selectedCountyBuildingLevels: Record<BuildingType, number>
   selectedCountyDefense: number
   selectedCountyRoadLevel: number
+  selectedCountyEffectiveRoadLevel: number
   selectedCountyYields: ResourceDelta
-  queuedBuildings: BuildingType[]
-  canQueueByBuilding: Record<BuildingType, boolean>
-  buildingCostLabels: Record<BuildingType, string>
+  activeBuildOrder: CountyBuildOrder | null
+  queuedBuildOrders: CountyBuildOrder[]
+  trackUpgradeOptions: TrackUpgradeOption[]
   activeTab: MacroPanelTab
   onTabChange: (tab: MacroPanelTab) => void
-  onQueueBuild: (buildingType: BuildingType) => void
-  onRemoveQueuedBuild: (queueIndex: number) => void
+  onQueueTrackUpgrade: (trackType: UpgradeTrackType) => void
+  onRemoveQueuedBuildOrder: (queueIndex: number) => void
   onEndTurn: () => void
 }
 
@@ -49,22 +64,25 @@ export function MacroPanel({
   turnNumber,
   selectedCounty,
   selectedCountyOwned,
-  selectedCountyBuildings,
+  selectedCountyBuildingLevels,
   selectedCountyDefense,
   selectedCountyRoadLevel,
+  selectedCountyEffectiveRoadLevel,
   selectedCountyYields,
-  queuedBuildings,
-  canQueueByBuilding,
-  buildingCostLabels,
+  activeBuildOrder,
+  queuedBuildOrders,
+  trackUpgradeOptions,
   activeTab,
   onTabChange,
-  onQueueBuild,
-  onRemoveQueuedBuild,
+  onQueueTrackUpgrade,
+  onRemoveQueuedBuildOrder,
   onEndTurn,
 }: MacroPanelProps) {
   const hasSelectedCounty = selectedCounty !== null
-  const uniqueBuildingTypes = [...new Set(selectedCountyBuildings)]
   const selectedCountyYieldEntries = getNonZeroResourceDeltaEntries(selectedCountyYields)
+  const builtBuildingTracks = BUILDING_ORDER.filter(
+    (buildingType) => (selectedCountyBuildingLevels[buildingType] ?? 0) > 0,
+  )
 
   return (
     <aside className="HudPanel MacroPanel" aria-label="Macro controls">
@@ -119,10 +137,10 @@ export function MacroPanel({
           </div>
 
           <div className="development-tags">
-            {uniqueBuildingTypes.length > 0 ? (
-              uniqueBuildingTypes.map((buildingType) => (
+            {builtBuildingTracks.length > 0 ? (
+              builtBuildingTracks.map((buildingType) => (
                 <span className="building-tag" key={`building-tag-${buildingType}`}>
-                  {BUILDING_DEFINITIONS[buildingType].badge}
+                  {BUILDING_DEFINITIONS[buildingType].badge} L{selectedCountyBuildingLevels[buildingType]}
                 </span>
               ))
             ) : (
@@ -138,7 +156,12 @@ export function MacroPanel({
             <dl className="county-stats-list">
               <div>
                 <dt>Roads</dt>
-                <dd>Level {selectedCountyRoadLevel}</dd>
+                <dd>
+                  L{selectedCountyRoadLevel}
+                  {selectedCountyEffectiveRoadLevel !== selectedCountyRoadLevel && (
+                    <span className="stats-muted"> (effective L{selectedCountyEffectiveRoadLevel})</span>
+                  )}
+                </dd>
               </div>
               <div>
                 <dt>Defense</dt>
@@ -164,56 +187,63 @@ export function MacroPanel({
           </div>
 
           <div className="development-block">
-            <p className="development-subheading">Current buildings</p>
-            {selectedCountyBuildings.length > 0 ? (
-              <ul className="building-list">
-                {selectedCountyBuildings.map((buildingType, index) => (
-                  <li className="building-list-item" key={`${buildingType}-${index}`}>
-                    <span className="building-list-name">
-                      {BUILDING_DEFINITIONS[buildingType].label}
-                    </span>
-                    <span className="building-list-badge">
-                      {BUILDING_DEFINITIONS[buildingType].badge}
-                    </span>
+            <p className="development-subheading">Upgrade tracks</p>
+            {selectedCountyOwned ? (
+              <ul className="track-upgrade-list">
+                {trackUpgradeOptions.map((track) => (
+                  <li className="track-upgrade-item" key={`track-upgrade-${track.trackType}`}>
+                    <div className="track-upgrade-meta">
+                      <strong>
+                        {track.label} <span className="stats-muted">L{track.level}/{MAX_TRACK_LEVEL}</span>
+                      </strong>
+                      <span>{track.yieldLabel}</span>
+                      <span>
+                        {track.costLabel} • {track.turnsRequired} turn{track.turnsRequired === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    <button
+                      className="secondary-button queue-remove-button"
+                      disabled={!track.canUpgrade}
+                      onClick={() => onQueueTrackUpgrade(track.trackType)}
+                      type="button"
+                    >
+                      Upgrade +1
+                    </button>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="queue-empty">No completed buildings in this county.</p>
+              <p className="queue-empty">Only player-owned counties can be developed.</p>
             )}
           </div>
 
           <div className="development-block">
-            <p className="development-subheading">Queue construction</p>
-            <div className="build-button-list">
-              {BUILDING_ORDER.map((buildingType) => (
-                <button
-                  className="secondary-button build-action-button"
-                  disabled={!selectedCountyOwned || !canQueueByBuilding[buildingType]}
-                  key={buildingType}
-                  onClick={() => onQueueBuild(buildingType)}
-                  type="button"
-                >
-                  <span>{BUILDING_DEFINITIONS[buildingType].label}</span>
-                  <small>{buildingCostLabels[buildingType]}</small>
-                </button>
-              ))}
-            </div>
+            <p className="development-subheading">In progress</p>
+            {activeBuildOrder ? (
+              <div className="queue-item">
+                <div>
+                  <strong>{TRACK_LABEL_BY_ID[activeBuildOrder.trackType]}</strong>
+                  <span>{activeBuildOrder.turnsRemaining} turn(s) remaining</span>
+                </div>
+              </div>
+            ) : (
+              <p className="queue-empty">No active upgrade in this county.</p>
+            )}
           </div>
 
           <div className="development-block">
-            <p className="development-subheading">Queued this turn</p>
-            {queuedBuildings.length > 0 ? (
+            <p className="development-subheading">Queued</p>
+            {queuedBuildOrders.length > 0 ? (
               <ul className="queue-list">
-                {queuedBuildings.map((buildingType, queueIndex) => (
-                  <li className="queue-item" key={`${buildingType}-queue-${queueIndex}`}>
+                {queuedBuildOrders.map((order, queueIndex) => (
+                  <li className="queue-item" key={order.id}>
                     <div>
-                      <strong>{BUILDING_DEFINITIONS[buildingType].label}</strong>
-                      <span>{BUILDING_DEFINITIONS[buildingType].badge}</span>
+                      <strong>{TRACK_LABEL_BY_ID[order.trackType]}</strong>
+                      <span>{order.turnsRemaining} turn(s)</span>
                     </div>
                     <button
                       className="secondary-button queue-remove-button"
-                      onClick={() => onRemoveQueuedBuild(queueIndex)}
+                      onClick={() => onRemoveQueuedBuildOrder(queueIndex)}
                       type="button"
                     >
                       Remove
@@ -222,7 +252,7 @@ export function MacroPanel({
                 ))}
               </ul>
             ) : (
-              <p className="queue-empty">No build orders queued for this county.</p>
+              <p className="queue-empty">No queued upgrades for this county.</p>
             )}
           </div>
         </section>

@@ -1394,6 +1394,11 @@ button:disabled {
   font-size: 0.82rem;
 }
 
+.stats-muted {
+  color: #c5bca3;
+  font-size: 0.74rem;
+}
+
 .county-yield-list {
   margin: 0;
   padding: 0;
@@ -1446,6 +1451,41 @@ button:disabled {
 .build-button-list {
   display: grid;
   gap: 0.42rem;
+}
+
+.track-upgrade-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.44rem;
+}
+
+.track-upgrade-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.52rem;
+  align-items: center;
+  padding: 0.45rem 0.48rem;
+  border: 1px solid rgba(238, 220, 180, 0.18);
+  border-radius: 9px;
+  background: rgba(194, 145, 70, 0.08);
+}
+
+.track-upgrade-meta {
+  min-width: 0;
+  display: grid;
+  gap: 0.08rem;
+  font-size: 0.76rem;
+}
+
+.track-upgrade-meta strong {
+  color: #f2e8c8;
+  font-size: 0.82rem;
+}
+
+.track-upgrade-meta span {
+  color: #d3c8a9;
 }
 
 .build-action-button {

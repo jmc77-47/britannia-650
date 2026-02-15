@@ -1,7 +1,9 @@
 import {
   BUILDING_DEFINITIONS,
+  BUILDING_ORDER,
   RESOURCE_KEYS,
-  type BuildingType,
+  addDeltas,
+  getBuildingYieldForLevel,
   type ResourceDelta,
   type ResourceKey,
 } from './buildings'
@@ -33,29 +35,8 @@ const RESOURCE_LABELS: Record<ResourceKey, string> = {
   horses: 'Horses',
 }
 
-const addResourceDeltas = (left: ResourceDelta, right: ResourceDelta): ResourceDelta => {
-  const combined: ResourceDelta = {}
-  RESOURCE_KEYS.forEach((resourceKey) => {
-    const total = (left[resourceKey] ?? 0) + (right[resourceKey] ?? 0)
-    if (total !== 0) {
-      combined[resourceKey] = total
-    }
-  })
-  return combined
-}
-
-const scaleResourceDelta = (delta: ResourceDelta, multiplier: number): ResourceDelta => {
-  const scaled: ResourceDelta = {}
-  RESOURCE_KEYS.forEach((resourceKey) => {
-    const scaledValue = (delta[resourceKey] ?? 0) * multiplier
-    if (scaledValue !== 0) {
-      scaled[resourceKey] = scaledValue
-    }
-  })
-  return scaled
-}
-
-const formatSignedAmount = (amount: number): string => (amount > 0 ? `+${amount}` : `${amount}`)
+const formatSignedAmount = (amount: number): string =>
+  amount > 0 ? `+${amount}` : `${amount}`
 
 export const getNonZeroResourceDeltaEntries = (
   delta: ResourceDelta,
@@ -93,32 +74,18 @@ const getCountyYieldBreakdown = (
     `${countyLabel}: +1 Gold (County base yield)`,
   ]
 
-  const buildingCounts = countyState.buildings.reduce<Record<BuildingType, number>>(
-    (counts, buildingType) => ({
-      ...counts,
-      [buildingType]: (counts[buildingType] ?? 0) + 1,
-    }),
-    {
-      HOMESTEADS: 0,
-      LUMBER_CAMP: 0,
-      PALISADE: 0,
-    },
-  )
-
-  ;(Object.keys(buildingCounts) as BuildingType[]).forEach((buildingType) => {
-    const buildingCount = buildingCounts[buildingType]
-    if (buildingCount <= 0) {
+  BUILDING_ORDER.forEach((buildingType) => {
+    const buildingLevel = countyState.buildings[buildingType] ?? 0
+    if (buildingLevel <= 0) {
       return
     }
 
-    const definition = BUILDING_DEFINITIONS[buildingType]
-    const scaledYield = scaleResourceDelta(definition.yieldsPerTurn, buildingCount)
-    totalDelta = addResourceDeltas(totalDelta, scaledYield)
+    const scaledYield = getBuildingYieldForLevel(buildingType, buildingLevel)
+    totalDelta = addDeltas(totalDelta, scaledYield)
 
     getNonZeroResourceDeltaEntries(scaledYield).forEach((entry) => {
-      const buildingSuffix = buildingCount > 1 ? ` x${buildingCount}` : ''
       contributionLines.push(
-        `${countyLabel}: ${formatSignedAmount(entry.amount)} ${entry.label} (${definition.label}${buildingSuffix})`,
+        `${countyLabel}: ${formatSignedAmount(entry.amount)} ${entry.label} (${BUILDING_DEFINITIONS[buildingType].label} L${buildingLevel})`,
       )
     })
   })
@@ -137,7 +104,7 @@ export const getPlayerTurnYieldSummary = (state: GameState): TurnYieldSummary =>
     (summary, countyId) => {
       const countyYield = getCountyYieldBreakdown(countyId, state)
       return {
-        totalDelta: addResourceDeltas(summary.totalDelta, countyYield.totalDelta),
+        totalDelta: addDeltas(summary.totalDelta, countyYield.totalDelta),
         contributionLines: [...summary.contributionLines, ...countyYield.contributionLines],
       }
     },

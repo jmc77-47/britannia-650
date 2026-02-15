@@ -15,17 +15,27 @@ import {
   mesh as topoMesh,
   neighbors as topoNeighbors,
 } from 'topojson-client'
-import { MacroPanel, type MacroPanelTab } from './components/MacroPanel'
+import {
+  MacroPanel,
+  type MacroPanelTab,
+  type TrackUpgradeOption,
+} from './components/MacroPanel'
 import { Modal } from './components/Modal'
 import { TurnReportModal } from './components/TurnReportModal'
 import { gameReducer } from './game/reducer'
 import {
-  BUILDING_DEFINITIONS,
   BUILDING_ORDER,
-  canQueueBuilding,
+  MAX_TRACK_LEVEL,
+  TRACK_LABEL_BY_ID,
+  createEmptyBuildingLevels,
   createZeroResources,
   formatCostLabel,
-  type BuildingType,
+  getBuildingYieldForLevel,
+  getCountyDefenseFromBuildingLevels,
+  getTrackUpgradeCost,
+  getTrackUpgradeTurns,
+  hasEnoughResources,
+  type UpgradeTrackType,
 } from './game/buildings'
 import { getCountyYields } from './game/economy'
 import {
@@ -34,6 +44,7 @@ import {
 } from './map/CanvasRoadLayer'
 import {
   createInitialGameState,
+  type CountyBuildQueueState,
   type GameState,
   type ResourceStockpile,
 } from './game/state'
@@ -278,6 +289,55 @@ const fetchJson = async <T,>(path: string): Promise<T> => {
   }
 
   return (await response.json()) as T
+}
+
+const UPGRADE_TRACK_ORDER: UpgradeTrackType[] = ['ROADS', ...BUILDING_ORDER]
+
+const getCountyTrackLevel = (
+  countyState: GameState['counties'][string] | null | undefined,
+  trackType: UpgradeTrackType,
+): number => {
+  if (!countyState) {
+    return 0
+  }
+  if (trackType === 'ROADS') {
+    return countyState.roadLevel
+  }
+  return countyState.buildings[trackType] ?? 0
+}
+
+const getQueuedTrackIncrements = (
+  queueState: CountyBuildQueueState | null | undefined,
+  trackType: UpgradeTrackType,
+): number => {
+  if (!queueState) {
+    return 0
+  }
+
+  let pendingIncrements = 0
+  if (queueState.activeOrder?.trackType === trackType) {
+    pendingIncrements += queueState.activeOrder.targetLevelDelta
+  }
+  queueState.queuedOrders.forEach((order) => {
+    if (order.trackType === trackType) {
+      pendingIncrements += order.targetLevelDelta
+    }
+  })
+
+  return pendingIncrements
+}
+
+const isTypingTarget = (eventTarget: EventTarget | null): boolean => {
+  if (!(eventTarget instanceof HTMLElement)) {
+    return false
+  }
+  const tagName = eventTarget.tagName
+  return (
+    tagName === 'INPUT' ||
+    tagName === 'TEXTAREA' ||
+    tagName === 'SELECT' ||
+    eventTarget.isContentEditable
+  )
 }
 
 function MacroGame({ initialGameState, mapData }: MacroGameProps) {
@@ -536,11 +596,11 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         : null,
     [gameState.counties, selectedCountyForPanel],
   )
-  const selectedCountyQueue = useMemo(
+  const selectedCountyQueueState = useMemo<CountyBuildQueueState>(
     () =>
       selectedCountyForPanel
-        ? gameState.buildQueueByCountyId[selectedCountyForPanel.id] ?? []
-        : [],
+        ? gameState.buildQueueByCountyId[selectedCountyForPanel.id] ?? { activeOrder: null, queuedOrders: [] }
+        : { activeOrder: null, queuedOrders: [] },
     [gameState.buildQueueByCountyId, selectedCountyForPanel],
   )
   const selectedCountyOwned = useMemo(
@@ -550,12 +610,28 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
         : false,
     [ownedCountyIdSet, selectedCountyForPanel],
   )
+  const selectedCountyActiveOrder = selectedCountyQueueState.activeOrder
+  const selectedCountyQueuedOrders = selectedCountyQueueState.queuedOrders
+  const selectedCountyDefense = useMemo(
+    () =>
+      selectedCountyState
+        ? getCountyDefenseFromBuildingLevels(selectedCountyState.buildings)
+        : 0,
+    [selectedCountyState],
+  )
   const selectedCountyYields = useMemo(
     () =>
       selectedCountyForPanel
         ? getCountyYields(selectedCountyForPanel.id, gameState)
         : {},
     [gameState, selectedCountyForPanel],
+  )
+  const selectedCountyEffectiveRoadLevel = useMemo(
+    () =>
+      gameState.superhighwaysEnabled
+        ? 20
+        : selectedCountyState?.roadLevel ?? 0,
+    [gameState.superhighwaysEnabled, selectedCountyState],
   )
   const selectedCharacter = useMemo(
     () =>
@@ -576,23 +652,65 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       gameState.resourcesByKingdomId[playerFactionId] ?? EMPTY_RESOURCE_STOCKPILE
     )
   }, [gameState.playerFactionId, gameState.resourcesByKingdomId])
-  const canQueueByBuilding = useMemo<Record<BuildingType, boolean>>(
-    () => ({
-      HOMESTEADS:
-        !!selectedCountyForPanel &&
+  const selectedCountyTrackUpgrades = useMemo<TrackUpgradeOption[]>(() => {
+    if (!selectedCountyState) {
+      return []
+    }
+
+    return UPGRADE_TRACK_ORDER.map((trackType) => {
+      const currentLevel = getCountyTrackLevel(selectedCountyState, trackType)
+      const queuedTrackIncrements = getQueuedTrackIncrements(
+        selectedCountyQueueState,
+        trackType,
+      )
+      const nextLevel = currentLevel + queuedTrackIncrements + 1
+      const turnsRequired =
+        nextLevel <= MAX_TRACK_LEVEL
+          ? getTrackUpgradeTurns(trackType, nextLevel)
+          : 0
+      const upgradeCost =
+        nextLevel <= MAX_TRACK_LEVEL
+          ? getTrackUpgradeCost(trackType, nextLevel)
+          : {}
+      const canUpgrade =
         selectedCountyOwned &&
-        canQueueBuilding(selectedCountyQueue, 'HOMESTEADS', playerResources),
-      LUMBER_CAMP:
-        !!selectedCountyForPanel &&
-        selectedCountyOwned &&
-        canQueueBuilding(selectedCountyQueue, 'LUMBER_CAMP', playerResources),
-      PALISADE:
-        !!selectedCountyForPanel &&
-        selectedCountyOwned &&
-        canQueueBuilding(selectedCountyQueue, 'PALISADE', playerResources),
-    }),
-    [playerResources, selectedCountyForPanel, selectedCountyOwned, selectedCountyQueue],
-  )
+        nextLevel <= MAX_TRACK_LEVEL &&
+        hasEnoughResources(playerResources, upgradeCost)
+
+      let yieldLabel = 'No direct resource yield'
+      if (trackType !== 'ROADS') {
+        const currentYield = getBuildingYieldForLevel(trackType, currentLevel)
+        const hasYieldNow = Object.keys(currentYield).length > 0
+        if (hasYieldNow) {
+          yieldLabel = `${formatCostLabel(currentYield)}/turn`
+        } else {
+          const baseYield = getBuildingYieldForLevel(trackType, 1)
+          yieldLabel =
+            Object.keys(baseYield).length > 0
+              ? `L1: ${formatCostLabel(baseYield)}/turn`
+              : 'No direct resource yield'
+        }
+      }
+
+      return {
+        trackType,
+        label: TRACK_LABEL_BY_ID[trackType],
+        level: currentLevel,
+        turnsRequired,
+        yieldLabel,
+        costLabel:
+          nextLevel <= MAX_TRACK_LEVEL
+            ? formatCostLabel(upgradeCost)
+            : 'Max level reached',
+        canUpgrade,
+      }
+    })
+  }, [
+    playerResources,
+    selectedCountyOwned,
+    selectedCountyQueueState,
+    selectedCountyState,
+  ])
 
   const kingdomByCountyId = useMemo(() => {
     const map = new Map<
@@ -900,7 +1018,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
   const getEffectiveRoadLevel = useCallback(
     (countyId: string): number => {
       const baseRoadLevel = gameState.counties[countyId]?.roadLevel ?? 0
-      return gameState.superhighwaysEnabled ? 5 : baseRoadLevel
+      return gameState.superhighwaysEnabled ? 20 : baseRoadLevel
     },
     [gameState.counties, gameState.superhighwaysEnabled],
   )
@@ -1001,52 +1119,60 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
     setSetupCharacterId(gameState.availableCharacters[0]?.id ?? null)
     dispatch({ type: 'OPEN_SETUP' })
   }, [gameState.availableCharacters])
-  const queueBuildingForSelectedCounty = useCallback(
-    (buildingType: BuildingType) => {
+  const queueTrackUpgradeForSelectedCounty = useCallback(
+    (trackType: UpgradeTrackType) => {
       if (!selectedCountyForPanel) {
         return
       }
 
       dispatch({
-        type: 'QUEUE_BUILD',
+        type: 'QUEUE_TRACK_UPGRADE',
         countyId: selectedCountyForPanel.id,
-        buildingType,
+        trackType,
       })
     },
     [selectedCountyForPanel],
   )
-  const removeQueuedBuildingForSelectedCounty = useCallback(
+  const removeQueuedOrderForSelectedCounty = useCallback(
     (queueIndex: number) => {
       if (!selectedCountyForPanel) {
         return
       }
 
       dispatch({
-        type: 'REMOVE_QUEUED_BUILD',
+        type: 'REMOVE_QUEUED_BUILD_ORDER',
         countyId: selectedCountyForPanel.id,
         queueIndex,
       })
     },
     [selectedCountyForPanel],
   )
-  const selectedCountyBuildingCostLabels = useMemo(
-    () =>
-      BUILDING_ORDER.reduce<Record<BuildingType, string>>(
-        (labels, buildingType) => ({
-          ...labels,
-          [buildingType]: formatCostLabel(BUILDING_DEFINITIONS[buildingType].cost),
-        }),
-        {
-          HOMESTEADS: '',
-          LUMBER_CAMP: '',
-          PALISADE: '',
-        },
-      ),
-    [],
-  )
+  const handleEndTurn = useCallback(() => {
+    dispatch({ type: 'END_TURN' })
+  }, [])
   const closeTurnReport = useCallback(() => {
     dispatch({ type: 'CLOSE_TURN_REPORT' })
   }, [])
+
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.repeat) {
+        return
+      }
+      if (isTypingTarget(event.target)) {
+        return
+      }
+      if (isSetupPhase || settingsOpen || !!gameState.lastTurnReport) {
+        return
+      }
+
+      event.preventDefault()
+      handleEndTurn()
+    }
+
+    window.addEventListener('keydown', onWindowKeyDown)
+    return () => window.removeEventListener('keydown', onWindowKeyDown)
+  }, [gameState.lastTurnReport, handleEndTurn, isSetupPhase, settingsOpen])
 
   return (
     <div className={`MacroRoot${isDragging ? ' is-map-dragging' : ''}`}>
@@ -1215,7 +1341,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
                     if (!isCountyVisible(county.id)) {
                       return false
                     }
-                    return gameState.counties[county.id]?.buildings.includes('PALISADE')
+                    return (gameState.counties[county.id]?.buildings.PALISADE ?? 0) >= 1
                   })
                   .map((county) => (
                     <g
@@ -1351,16 +1477,19 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
       {gameState.gamePhase === 'playing' && (
         <MacroPanel
           activeTab={activeTab}
-          onEndTurn={() => dispatch({ type: 'END_TURN' })}
-          onQueueBuild={queueBuildingForSelectedCounty}
-          onRemoveQueuedBuild={removeQueuedBuildingForSelectedCounty}
+          onEndTurn={handleEndTurn}
+          onQueueTrackUpgrade={queueTrackUpgradeForSelectedCounty}
+          onRemoveQueuedBuildOrder={removeQueuedOrderForSelectedCounty}
           onTabChange={setActiveTab}
-          canQueueByBuilding={canQueueByBuilding}
-          buildingCostLabels={selectedCountyBuildingCostLabels}
-          queuedBuildings={selectedCountyQueue}
-          selectedCountyBuildings={selectedCountyState?.buildings ?? []}
-          selectedCountyDefense={selectedCountyState?.defense ?? 0}
+          activeBuildOrder={selectedCountyActiveOrder}
+          queuedBuildOrders={selectedCountyQueuedOrders}
+          selectedCountyBuildingLevels={
+            selectedCountyState?.buildings ?? createEmptyBuildingLevels()
+          }
+          selectedCountyDefense={selectedCountyDefense}
+          selectedCountyEffectiveRoadLevel={selectedCountyEffectiveRoadLevel}
           selectedCountyRoadLevel={selectedCountyState?.roadLevel ?? 0}
+          trackUpgradeOptions={selectedCountyTrackUpgrades}
           selectedCountyYields={selectedCountyYields}
           selectedCountyOwned={selectedCountyOwned}
           selectedCounty={selectedCountyForPanel}
@@ -1420,7 +1549,7 @@ function MacroGame({ initialGameState, mapData }: MacroGameProps) {
                 <div className="settings-toggle-copy">
                   <p className="settings-toggle-label">Superhighways</p>
                   <p className="settings-toggle-desc">
-                    Force all visible roads to render at Level 5.
+                    Force all visible roads to render at Level 20.
                   </p>
                 </div>
                 <div className="settings-toggle-controls">
